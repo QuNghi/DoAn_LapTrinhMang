@@ -2,9 +2,11 @@ package com.bomberman.server.logic;
 
 import com.bomberman.common.Direction;
 import com.bomberman.common.GameConstants;
+import com.bomberman.common.ItemType;
 import com.bomberman.common.TileType;
 import com.bomberman.server.model.Bomb;
 import com.bomberman.server.model.GameMap;
+import com.bomberman.server.model.Item;
 import com.bomberman.server.model.Player;
 import com.bomberman.server.network.PlayerSession;
 import com.bomberman.server.network.UdpServer;
@@ -25,10 +27,12 @@ public class GameEngine {
     private final Map<String, PlayerSession> sessionsByAddress = new ConcurrentHashMap<>();
     private final Map<Integer, PlayerSession> sessionsById = new ConcurrentHashMap<>();
     private final List<Bomb> bombs = new CopyOnWriteArrayList<>();
+    private final List<Item> items = new CopyOnWriteArrayList<>();
 
     private final ScheduledExecutorService gameLoopExecutor = Executors.newSingleThreadScheduledExecutor();
     private final AtomicInteger nextPlayerId = new AtomicInteger(1);
     private final AtomicInteger bombCounter = new AtomicInteger(1);
+    private final AtomicInteger itemCounter = new AtomicInteger(1);
 
     private volatile boolean gameStarted = false;
     private volatile boolean gameOver = false;
@@ -87,6 +91,11 @@ public class GameEngine {
                 handlePlaceBomb(sessionKey);
                 break;
 
+            case "USE_WEAPON":
+            case "ACTION":
+                handleUseWeapon(sessionKey);
+                break;
+
             case "PING":
                 PlayerSession pingSession = sessionsByAddress.get(sessionKey);
                 if (pingSession != null) {
@@ -132,6 +141,12 @@ public class GameEngine {
         // Gửi phản hồi JOIN_ACK và khởi tạo bản đồ cho người chơi mới
         server.send(String.format("JOIN_ACK|%d|SUCCESS|Joined as %s", id, playerName), address, port);
         server.send(String.format("MAP_INIT|%d|%d|%s", map.getWidth(), map.getHeight(), map.toFlatString()), address, port);
+
+        // Gửi các vật phẩm đang có sẵn trên sân đấu
+        for (Item item : items) {
+            server.send(String.format("ITEM_SPAWN|%s|%d|%d|%d",
+                    item.getId(), item.getType().getId(), item.getGridX(), item.getGridY()), address, port);
+        }
 
         // Nếu phòng đạt đủ người chơi (hoặc từ 2 người trở lên) thì kích hoạt bắt đầu game
         if (!gameStarted && sessionsById.size() >= GameConstants.MAX_PLAYERS) {
@@ -211,15 +226,18 @@ public class GameEngine {
             // 2. Cập nhật vị trí di chuyển các nhân vật
             updatePlayerMovement();
 
-            // 3. Cập nhật bộ đếm thời gian của các quả bom và kích nổ
+            // 3. Kiểm tra nhặt vật phẩm trên bản đồ
+            checkItemPickups();
+
+            // 4. Cập nhật bộ đếm thời gian của các quả bom và kích nổ
             updateBombs();
 
-            // 4. Kiểm tra điều kiện kết thúc trận đấu (Game Over)
+            // 5. Kiểm tra điều kiện kết thúc trận đấu (Game Over)
             if (gameStarted && !gameOver) {
                 checkGameOver();
             }
 
-            // 5. Broadcast gói tin WORLD STATE về cho toàn bộ client
+            // 6. Broadcast gói tin WORLD STATE về cho toàn bộ client
             broadcastWorldState();
 
         } catch (Exception e) {
@@ -249,7 +267,8 @@ public class GameEngine {
             Direction dir = p.getDirection();
             if (dir == Direction.STOP) continue;
 
-            double step = GameConstants.PLAYER_SPEED;
+            // Sử dụng tốc độ di chuyển hiện tại của người chơi (đã cộng buff nếu có)
+            double step = p.getSpeed();
             double dx = dir.getDx() * step;
             double dy = dir.getDy() * step;
 
@@ -259,6 +278,34 @@ public class GameEngine {
             if (CollisionDetector.canMove(map, bombs, p.getX(), p.getY(), newX, newY)) {
                 p.setX(newX);
                 p.setY(newY);
+            }
+        }
+    }
+
+    /**
+     * Kiểm tra khi người chơi bước vào ô có chứa vật phẩm buff.
+     */
+    private void checkItemPickups() {
+        for (PlayerSession session : sessionsById.values()) {
+            Player player = session.getPlayer();
+            if (!player.isAlive()) continue;
+
+            int px = player.getGridX();
+            int py = player.getGridY();
+
+            for (Item item : items) {
+                if (item.getGridX() == px && item.getGridY() == py) {
+                    boolean applied = player.applyItem(item.getType());
+                    items.remove(item);
+
+                    System.out.printf("[GAME-ENGINE] Player %d (%s) nhặt vật phẩm %s (%s). Kích hoạt=%b%n",
+                            player.getId(), player.getName(), item.getId(), item.getType().getDisplayName(), applied);
+
+                    // Broadcast sự kiện nhặt vật phẩm cho các client
+                    server.broadcast(String.format("ITEM_COLLECT|%s|%d|%d|%s",
+                            item.getId(), player.getId(), item.getType().getId(), item.getType().name()), sessionsById.values());
+                    break;
+                }
             }
         }
     }
@@ -277,8 +324,9 @@ public class GameEngine {
         }
 
         for (Bomb bomb : explodedBombs) {
-            // Xử lý nổ
-            ExplosionHandler.ExplosionResult result = ExplosionHandler.processExplosion(map, bombs, allPlayers, bomb);
+            // Xử lý nổ (bao gồm rơi vật phẩm, phá hủy gạch, phá khiên / diệt player, cháy vật phẩm trên sàn)
+            ExplosionHandler.ExplosionResult result = ExplosionHandler.processExplosion(
+                    map, bombs, allPlayers, items, bomb, itemCounter);
 
             // Hoàn lại số lượng bom cho chủ nhân
             PlayerSession ownerSession = sessionsById.get(bomb.getOwnerId());
@@ -302,6 +350,30 @@ public class GameEngine {
                 server.broadcast(String.format("TILE_UPDATE|%d|%d|%d", brick.x, brick.y, TileType.EMPTY.getCode()), sessionsById.values());
             }
 
+            // Xử lý và broadcast các vật phẩm mới rơi ra
+            for (Item spawnedItem : result.spawnedItems) {
+                items.add(spawnedItem);
+                System.out.printf("[GAME-ENGINE] Gạch vỡ làm rơi vật phẩm: %s (%s) tại (%d, %d)%n",
+                        spawnedItem.getId(), spawnedItem.getType().getDisplayName(), spawnedItem.getGridX(), spawnedItem.getGridY());
+                server.broadcast(String.format("ITEM_SPAWN|%s|%d|%d|%d",
+                        spawnedItem.getId(), spawnedItem.getType().getId(), spawnedItem.getGridX(), spawnedItem.getGridY()), sessionsById.values());
+            }
+
+            // Xử lý các vật phẩm bị lửa bom thiêu hủy
+            for (Item burntItem : result.incineratedItems) {
+                items.remove(burntItem);
+                System.out.printf("[GAME-ENGINE] Vật phẩm %s tại (%d, %d) bị lửa thiêu cháy!%n",
+                        burntItem.getId(), burntItem.getGridX(), burntItem.getGridY());
+                server.broadcast(String.format("ITEM_DESTROYED|%s", burntItem.getId()), sessionsById.values());
+            }
+
+            // Broadcast thông báo khiên bảo vệ thành công cứu người chơi khỏi chết
+            for (Player savedPlayer : result.shieldSavedPlayers) {
+                System.out.printf("[GAME-ENGINE] Khiên của %s (ID=%d) đã vỡ để hấp thụ sát thương!%n",
+                        savedPlayer.getName(), savedPlayer.getId());
+                server.broadcast(String.format("SHIELD_BROKEN|%d|%s", savedPlayer.getId(), savedPlayer.getName()), sessionsById.values());
+            }
+
             // Broadcast thông báo người chơi bị tiêu diệt
             for (Player deadPlayer : result.killedPlayers) {
                 System.out.printf("[GAME-ENGINE] Người chơi %s (ID=%d) đã bị tiêu diệt bởi bom của Player %d!%n",
@@ -312,6 +384,114 @@ public class GameEngine {
 
         // Loại bỏ các quả bom đã nổ xong khỏi danh sách
         bombs.removeIf(Bomb::isExploded);
+    }
+
+    /**
+     * Xử lý khi người chơi sử dụng vũ khí (Súng Laser / Rocket như game Bomb IT).
+     */
+    private void handleUseWeapon(String sessionKey) {
+        PlayerSession session = sessionsByAddress.get(sessionKey);
+        if (session == null) return;
+        session.updateHeartbeat();
+
+        Player shooter = session.getPlayer();
+        if (!shooter.isAlive() || shooter.getWeapon() == null || shooter.getWeaponAmmo() <= 0) {
+            return;
+        }
+
+        boolean used = shooter.useWeapon();
+        if (!used) return;
+
+        Direction dir = shooter.getDirection() != Direction.STOP ? shooter.getDirection() : shooter.getLastFacingDirection();
+        int cx = shooter.getGridX();
+        int cy = shooter.getGridY();
+
+        List<Point> trajectory = new ArrayList<>();
+        int hitType = 0; // 0 = hụt, 1 = trúng tường cứng, 2 = trúng gạch, 3 = trúng bom, 4 = trúng người chơi
+        int hitTargetId = 0;
+
+        int maxRange = 12;
+        for (int step = 1; step <= maxRange; step++) {
+            int nx = cx + dir.getDx() * step;
+            int ny = cy + dir.getDy() * step;
+
+            if (nx < 0 || nx >= map.getWidth() || ny < 0 || ny >= map.getHeight()) {
+                break;
+            }
+
+            trajectory.add(new Point(nx, ny));
+
+            // 1. Kiểm tra trúng người chơi khác
+            boolean hitPlayer = false;
+            for (PlayerSession otherSession : sessionsById.values()) {
+                Player target = otherSession.getPlayer();
+                if (target.getId() != shooter.getId() && target.isAlive() && target.getGridX() == nx && target.getGridY() == ny) {
+                    hitType = 4;
+                    hitTargetId = target.getId();
+                    boolean killed = target.takeDamage();
+                    if (killed) {
+                        shooter.addScore(100);
+                        System.out.printf("[GAME-ENGINE] Player %d dùng súng bắn hạ Player %d!%n", shooter.getId(), target.getId());
+                        server.broadcast(String.format("PLAYER_DIED|%d|%d", target.getId(), shooter.getId()), sessionsById.values());
+                    } else {
+                        System.out.printf("[GAME-ENGINE] Khiên của Player %d đã đỡ được phát bắn từ Player %d!%n", target.getId(), shooter.getId());
+                        server.broadcast(String.format("SHIELD_BROKEN|%d|%s", target.getId(), target.getName()), sessionsById.values());
+                    }
+                    hitPlayer = true;
+                    break;
+                }
+            }
+            if (hitPlayer) break;
+
+            // 2. Kiểm tra trúng tường cứng
+            if (map.getTile(nx, ny) == TileType.HARD_WALL.getCode()) {
+                hitType = 1;
+                break;
+            }
+
+            // 3. Kiểm tra trúng gạch mềm (phá hủy gạch)
+            if (map.getTile(nx, ny) == TileType.SOFT_BRICK.getCode()) {
+                hitType = 2;
+                map.destroyBrick(nx, ny);
+                server.broadcast(String.format("TILE_UPDATE|%d|%d|%d", nx, ny, TileType.EMPTY.getCode()), sessionsById.values());
+
+                if (Math.random() < GameConstants.ITEM_DROP_RATE) {
+                    ItemType droppedType = ExplosionHandler.randomItemType();
+                    Item newItem = new Item("IT" + itemCounter.getAndIncrement(), droppedType, nx, ny);
+                    items.add(newItem);
+                    server.broadcast(String.format("ITEM_SPAWN|%s|%d|%d|%d",
+                            newItem.getId(), droppedType.getId(), nx, ny), sessionsById.values());
+                }
+                break;
+            }
+
+            // 4. Kiểm tra trúng bom (kích nổ bom ngay lập tức)
+            boolean hitBomb = false;
+            for (Bomb b : bombs) {
+                if (!b.isExploded() && b.getGridX() == nx && b.getGridY() == ny) {
+                    hitType = 3;
+                    b.triggerExplosion();
+                    hitBomb = true;
+                    break;
+                }
+            }
+            if (hitBomb) break;
+        }
+
+        // Đóng gói đường bay của đạn x1,y1;x2,y2
+        StringBuilder pathSb = new StringBuilder();
+        for (int i = 0; i < trajectory.size(); i++) {
+            Point pt = trajectory.get(i);
+            pathSb.append(pt.x).append(",").append(pt.y);
+            if (i < trajectory.size() - 1) pathSb.append(";");
+        }
+
+        System.out.printf("[GAME-ENGINE] Player %d (%s) bắn vũ khí! Còn %d lượt. Trúng loại: %d (Mục tiêu: %d)%n",
+                shooter.getId(), shooter.getName(), shooter.getWeaponAmmo(), hitType, hitTargetId);
+
+        server.broadcast(String.format("WEAPON_USED|%d|%s|%d|%s|%d|%d",
+                shooter.getId(), ItemType.WEAPON_GUN.name(), shooter.getWeaponAmmo(),
+                pathSb.length() > 0 ? pathSb.toString() : "NONE", hitType, hitTargetId), sessionsById.values());
     }
 
     private void checkGameOver() {
@@ -341,7 +521,7 @@ public class GameEngine {
     private void broadcastWorldState() {
         if (sessionsById.isEmpty()) return;
 
-        // Xây dựng chuỗi players_data: id,x,y,alive,score,direction;...
+        // Xây dựng chuỗi players_data: id,x,y,alive,score,direction,hasShield,weaponAmmo;...
         StringBuilder pSb = new StringBuilder();
         int pIndex = 0;
         for (PlayerSession session : sessionsById.values()) {
@@ -365,7 +545,20 @@ public class GameEngine {
             }
         }
 
-        String statePacket = String.format("STATE|%d|%s|%s", currentTick, pSb, bSb);
+        // Xây dựng chuỗi items_data: itemId,itemTypeId,gridX,gridY;...
+        StringBuilder iSb = new StringBuilder();
+        if (items.isEmpty()) {
+            iSb.append("NONE");
+        } else {
+            for (int i = 0; i < items.size(); i++) {
+                iSb.append(items.get(i).toStateString());
+                if (i < items.size() - 1) {
+                    iSb.append(";");
+                }
+            }
+        }
+
+        String statePacket = String.format("STATE|%d|%s|%s|%s", currentTick, pSb, bSb, iSb);
         server.broadcast(statePacket, sessionsById.values());
     }
 

@@ -62,12 +62,17 @@ A. CLIENT GỬI LÊN SERVER (CLIENT -> SERVER):
    - Ví dụ:   BOMB
    - Ý nghĩa: Người chơi bấm phím Space. Server sẽ lấy tọa độ hiện tại của Player làm tròn thành ô lưới (gridX, gridY) và sinh ra bom.
 
-4. Nhịp tim giữ kết nối (Heartbeat):
+4. Sử dụng vũ khí (Bomb IT style):
+   - Cú pháp: USE_WEAPON
+   - Ví dụ:   USE_WEAPON
+   - Ý nghĩa: Người chơi bấm phím 'F' (hoặc nút bắn). Server bắn tia đạn theo hướng mặt nhân vật, phá gạch/kích nổ bom/hạ gục đối thủ hoặc phá khiên của đối thủ.
+
+5. Nhịp tim giữ kết nối (Heartbeat):
    - Cú pháp: PING
    - Ví dụ:   PING
-   - Ý nghĩa: Client gửi định kỳ 1 giây/lần để Server biết Client vẫn đang online.
+   - Ý nghĩa: Client gửi định kỳ 1-3 giây/lần để Server biết Client vẫn đang online.
 
-5. Thoát game:
+6. Thoát game:
    - Cú pháp: QUIT
    - Ví dụ:   QUIT
    - Ý nghĩa: Client đóng cửa sổ hoặc chủ động thoát.
@@ -88,32 +93,58 @@ B. SERVER GỬI VỀ CLIENT (SERVER -> CLIENT):
    - Cú pháp: GAME_START|<total_players>
    - Ví dụ:   GAME_START|3
 
-4. Đồng bộ trạng thái thế giới định kỳ (BROADCAST WORLD STATE - 30 đến 60 lần/giây):
-   - Cú pháp: STATE|<tick>|<players_data>|<bombs_data>
+4. Đồng bộ trạng thái thế giới định kỳ (BROADCAST WORLD STATE - 30 lần/giây):
+   - Cú pháp: STATE|<tick>|<players_data>|<bombs_data>|<items_data>
    - Cấu trúc <players_data>: Mỗi player cách nhau dấu ";", các trường cách nhau dấu ","
-     Format: <id>,<x>,<y>,<alive>,<score>,<direction>
-     Ví dụ:  1,1.00,1.00,1,0,UP;2,13.00,1.00,1,0,LEFT;3,1.00,11.00,0,0,STOP
+     Format: <id>,<x>,<y>,<alive>,<score>,<direction>,<hasShield>,<weaponAmmo>
+     Ví dụ:  1,1.00,1.00,1,0,UP,1,3;2,13.00,1.00,1,0,LEFT,0,0
+     (hasShield: 1 là đang có khiên bảo vệ, 0 là không có; weaponAmmo: số đạn súng còn lại)
    - Cấu trúc <bombs_data>: Mỗi quả bom cách nhau dấu ";", các trường cách nhau dấu ","
      Format: <bombId>,<gridX>,<gridY>,<countdown_ms>
-     Ví dụ:  B1,3,4,1500;B2,5,6,2800 (nếu không có bom thì để trống hoặc NONE)
+     Ví dụ:  B1,3,4,1500;B2,5,6,2800 (nếu không có bom thì là NONE)
+   - Cấu trúc <items_data>: Danh sách vật phẩm đang nằm trên sàn cách nhau dấu ";"
+     Format: <itemId>,<typeCode>,<gridX>,<gridY>
+     (Các loại typeCode: 1=BOMB_RANGE, 2=SPEED_BOOST, 3=BOMB_COUNT, 4=SHIELD, 5=WEAPON_GUN)
+     Ví dụ:  IT1,1,3,4;IT2,4,5,6 (nếu không có item thì là NONE)
    - Ví dụ hoàn chỉnh:
-     STATE|120|1,1.50,2.00,1,0,DOWN;2,12.00,1.00,1,0,LEFT|B1,3,4,1800
+     STATE|120|1,1.50,2.00,1,0,DOWN,1,2;2,12.00,1.00,1,0,LEFT,0,0|B1,3,4,1800|IT1,4,5,5
 
-5. Thông báo bom nổ & hiệu ứng lửa:
+5. Rơi vật phẩm buff (khi gạch mềm vỡ):
+   - Cú pháp: ITEM_SPAWN|<itemId>|<typeCode>|<gridX>|<gridY>
+   - Ví dụ:   ITEM_SPAWN|IT1|4|5|6 (Khiên bảo vệ rơi ra tại ô 5,6)
+
+6. Nhặt vật phẩm buff:
+   - Cú pháp: ITEM_COLLECT|<itemId>|<playerId>|<typeCode>|<typeName>
+   - Ví dụ:   ITEM_COLLECT|IT1|1|4|SHIELD (Player 1 nhặt khiên)
+
+7. Vật phẩm bị thiêu hủy (bom nổ trúng vật phẩm đang trên sàn):
+   - Cú pháp: ITEM_DESTROYED|<itemId>
+   - Ví dụ:   ITEM_DESTROYED|IT1
+
+8. Khiên chắn đỡ sát thương (hấp thụ đòn nổ bom hoặc đạn súng):
+   - Cú pháp: SHIELD_BROKEN|<playerId>|<playerName>
+   - Ví dụ:   SHIELD_BROKEN|1|Player1 (Khiên vỡ, người chơi thoát chết)
+
+9. Khai hỏa vũ khí (Súng Laser / Rocket):
+   - Cú pháp: WEAPON_USED|<shooterId>|<weaponType>|<ammoRemaining>|<trajectory>|<hitType>|<hitTargetId>
+   - Trajectory: Danh sách ô đạn bay qua dạng x1,y1;x2,y2
+   - HitType: 1=Tường cứng, 2=Gạch vỡ, 3=Bom nổ, 4=Trúng người chơi
+   - Ví dụ:   WEAPON_USED|1|WEAPON_GUN|2|2,1;3,1;4,1|4|2 (Bắn trúng Player 2)
+
+10. Thông báo bom nổ & hiệu ứng lửa:
    - Cú pháp: EXPLODE|<bombId>|<list_of_cells>
    - Cấu trúc <list_of_cells>: Các ô bị bao phủ bởi lửa dạng x,y cách nhau dấu ";"
    - Ví dụ:   EXPLODE|B1|3,4;3,3;3,5;2,4;4,4
-   - Ý nghĩa: Client nhận được gói này sẽ kích hoạt hoạt ảnh lửa nổ tại các ô tương ứng.
 
-6. Cập nhật thay đổi bản đồ (khi gạch mềm bị nổ thành ô trống):
+11. Cập nhật thay đổi bản đồ (khi gạch mềm bị nổ thành ô trống):
    - Cú pháp: TILE_UPDATE|<gridX>|<gridY>|<newTileType>
    - Ví dụ:   TILE_UPDATE|3|3|0 (ô 3,3 gạch mềm vỡ thành ô trống 0)
 
-7. Người chơi bị hạ gục:
+12. Người chơi bị hạ gục:
    - Cú pháp: PLAYER_DIED|<playerId>|<killerId>
    - Ví dụ:   PLAYER_DIED|2|1
 
-8. Kết thúc trận đấu:
+13. Kết thúc trận đấu:
    - Cú pháp: GAME_OVER|<winnerId>|<winnerName>
    - Ví dụ:   GAME_OVER|1|Player1 (nếu hòa thì winnerId = 0)
 

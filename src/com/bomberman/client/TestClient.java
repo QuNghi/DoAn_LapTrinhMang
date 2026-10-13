@@ -77,6 +77,11 @@ public class TestClient {
                 case "space":
                     sendPacket("BOMB");
                     break;
+                case "f":
+                case "shoot":
+                case "use":
+                    sendPacket("USE_WEAPON");
+                    break;
                 case "q":
                 case "quit":
                     sendPacket("QUIT");
@@ -85,7 +90,7 @@ public class TestClient {
                     System.out.println("[CLIENT] Đã thoát.");
                     return;
                 default:
-                    System.out.println("[CLIENT] Lệnh không hợp lệ. Gõ w/a/s/d để di chuyển, b để đặt bom, q để thoát.");
+                    System.out.println("[CLIENT] Lệnh không hợp lệ. Gõ w/a/s/d di chuyển, b đặt bom, f bắn súng, q thoát.");
             }
         }
     }
@@ -139,7 +144,8 @@ public class TestClient {
                 // In định kỳ mỗi 30 tick để tránh tràn màn hình console
                 long tick = Long.parseLong(parts[1]);
                 if (tick % 30 == 0) {
-                    System.out.printf("[STATE Tick %d] Players: %s | Bombs: %s%n", tick, parts[2], parts[3]);
+                    String itemsStr = parts.length > 4 ? parts[4] : "NONE";
+                    System.out.printf("[STATE Tick %d] Players: %s | Bombs: %s | Items: %s%n", tick, parts[2], parts[3], itemsStr);
                 }
                 break;
 
@@ -149,6 +155,27 @@ public class TestClient {
 
             case "TILE_UPDATE":
                 System.out.printf(">>> [MAP UPDATE] Ô (%s, %s) biến thành loại %s%n", parts[1], parts[2], parts[3]);
+                break;
+
+            case "ITEM_SPAWN":
+                System.out.printf(">>> [VẬT PHẨM MỚI] %s (Loại %s) rơi ra tại ô (%s, %s)%n", parts[1], parts[2], parts[3], parts[4]);
+                break;
+
+            case "ITEM_COLLECT":
+                System.out.printf(">>> [NHẶT BUFF] Player %s đã nhặt vật phẩm %s (Loại: %s)%n", parts[2], parts[1], parts[4]);
+                break;
+
+            case "ITEM_DESTROYED":
+                System.out.printf(">>> [VẬT PHẨM CHÁY] Vật phẩm %s đã bị lửa bom thiêu rụi!%n", parts[1]);
+                break;
+
+            case "SHIELD_BROKEN":
+                System.out.printf(">>> [KHIÊN VỠ!] Khiên của Player %s (%s) vừa đỡ 1 đòn chí mạng và vỡ!%n", parts[1], parts[2]);
+                break;
+
+            case "WEAPON_USED":
+                System.out.printf(">>> [BẮN SÚNG!] Player %s khai hỏa %s! Đạn còn: %s | Trúng: %s (TargetID: %s)%n",
+                        parts[1], parts[2], parts[3], parts[5], parts[6]);
                 break;
 
             case "PLAYER_DIED":
@@ -184,6 +211,7 @@ public class TestClient {
         System.out.println("  'd' -> Sang phải (RIGHT)");
         System.out.println("  'x' -> Dừng lại (STOP)");
         System.out.println("  'b' -> Đặt bom (BOMB)");
+        System.out.println("  'f' -> Bắn súng vũ khí (USE_WEAPON - Bomb IT style)");
         System.out.println("  'q' -> Thoát (QUIT)");
         System.out.println("==========================================================");
     }

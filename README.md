@@ -26,22 +26,24 @@ DoAn_LapTrinhMang/
 │       ├── common/               # Các lớp dùng chung giữa Server và Client
 │       │   ├── GameConstants.java # Hằng số (Port: 9876, Tick: 30 FPS, Map: 15x13, Bom: 3s)
 │       │   ├── Direction.java     # Hướng di chuyển: UP, DOWN, LEFT, RIGHT, STOP
-│       │   └── TileType.java      # Loại ô: EMPTY(0), HARD_WALL(1), SOFT_BRICK(2), BOMB(3)
+│       │   ├── TileType.java      # Loại ô: EMPTY(0), HARD_WALL(1), SOFT_BRICK(2), BOMB(3)
+│       │   └── ItemType.java      # Loại vật phẩm: RANGE(1), SPEED(2), BOMBS(3), SHIELD(4), GUN(5)
 │       ├── server/               # Mã nguồn Server (Nhiệm vụ Thành viên 1)
 │       │   ├── model/
-│       │   │   ├── Player.java    # Quản lý trạng thái, tọa độ và điểm số người chơi
+│       │   │   ├── Player.java    # Trạng thái người chơi (máu, tọa độ, khiên, số đạn súng, tốc độ)
 │       │   │   ├── Bomb.java      # Quản lý quả bom, đếm ngược nổ
+│       │   │   ├── Item.java      # Quản lý vật phẩm buff đang nằm trên bản đồ
 │       │   │   └── GameMap.java   # Quản lý ma trận bản đồ 15x13
 │       │   ├── network/
 │       │   │   ├── PlayerSession.java # Quản lý phiên kết nối (IP, Port, Heartbeat)
 │       │   │   └── UdpServer.java     # Lớp DatagramSocket nhận/gửi UDP bất đồng bộ
 │       │   ├── logic/
 │       │   │   ├── CollisionDetector.java # Kiểm tra va chạm tường cứng, gạch mềm, bom
-│       │   │   ├── ExplosionHandler.java  # Tính toán tia lửa 4 hướng, phá gạch, tiêu diệt player
-│       │   │   └── GameEngine.java        # Vòng lặp Authoritative Game Loop (30 Ticks/giây)
+│       │   │   ├── ExplosionHandler.java  # Tính toán tia lửa, phá gạch, rơi buff, thiêu vật phẩm, phá khiên
+│       │   │   └── GameEngine.java        # Vòng lặp Authoritative Game Loop (30 FPS), nhặt buff, bắn súng
 │       │   └── ServerMain.java   # Điểm khởi chạy Server console
 │       └── client/
-│           └── TestClient.java   # Client dòng lệnh độc lập để kiểm thử và làm mẫu cho TV2 & TV3
+│           └── TestClient.java   # Client dòng lệnh mô phỏng di chuyển, đặt bom, bắn súng và nhặt buff
 ```
 
 ---
@@ -72,12 +74,18 @@ java -cp bin com.bomberman.client.TestClient Player1 127.0.0.1 9876
   - `JOIN|<tên>` : Gia nhập phòng.
   - `MOVE|<UP|DOWN|LEFT|RIGHT|STOP>` : Di chuyển.
   - `BOMB` : Đặt bom tại tọa độ hiện tại.
+  - `USE_WEAPON` : Bắn súng vũ khí Laser/Rocket theo hướng mặt (Bomb IT style).
   - `PING` : Giữ kết nối (heartbeat).
   - `QUIT` : Thoát game.
 * **Server -> Client:**
   - `JOIN_ACK|<id>|<status>|<message>` : Xác nhận gia nhập.
   - `MAP_INIT|<width>|<height>|<matrix>` : Dữ liệu bản đồ.
-  - `STATE|<tick>|<players_data>|<bombs_data>` : Đồng bộ tọa độ thế giới (30 FPS).
+  - `STATE|<tick>|<players>|<bombs>|<items>` : Đồng bộ tọa độ thế giới (khiên, đạn, vật phẩm).
+  - `ITEM_SPAWN|<id>|<type>|<x>|<y>` : Rơi vật phẩm buff (Range, Speed, Bomb, Shield, Gun).
+  - `ITEM_COLLECT|<id>|<playerId>|<type>|<name>` : Người chơi nhặt vật phẩm.
+  - `ITEM_DESTROYED|<id>` : Vật phẩm bị lửa bom thiêu rụi.
+  - `SHIELD_BROKEN|<playerId>|<playerName>` : Khiên đỡ đòn thành công và vỡ.
+  - `WEAPON_USED|<shooterId>|<gun>|<ammo>|<path>|<hitType>|<targetId>` : Khai hỏa vũ khí.
   - `EXPLODE|<bombId>|<danh_sách_ô_nổ>` : Bom nổ hiệu ứng lửa.
   - `TILE_UPDATE|<x>|<y>|<tile>` : Cập nhật ô gạch vỡ thành ô trống.
   - `PLAYER_DIED|<id>|<killerId>` : Người chơi bị hạ gục.

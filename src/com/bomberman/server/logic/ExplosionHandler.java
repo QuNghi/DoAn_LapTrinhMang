@@ -2,26 +2,48 @@ package com.bomberman.server.logic;
 
 import com.bomberman.common.Direction;
 import com.bomberman.common.TileType;
+import com.bomberman.common.GameConstants;
+import com.bomberman.common.ItemType;
 import com.bomberman.server.model.Bomb;
 import com.bomberman.server.model.GameMap;
+import com.bomberman.server.model.Item;
 import com.bomberman.server.model.Player;
 
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Xử lý thuật toán lan truyền tia lửa bom nổ, phá hủy tường mềm và tiêu diệt người chơi.
+ * Xử lý thuật toán lan truyền tia lửa bom nổ, phá hủy tường mềm, rơi vật phẩm buff và tiêu diệt người chơi.
  */
 public class ExplosionHandler {
+
+    private static final Random random = new Random();
 
     public static class ExplosionResult {
         public final List<Point> flameCells = new ArrayList<>();
         public final List<Point> destroyedBricks = new ArrayList<>();
         public final List<Player> killedPlayers = new ArrayList<>();
+        public final List<Player> shieldSavedPlayers = new ArrayList<>();
         public final List<Bomb> triggeredBombs = new ArrayList<>();
+        public final List<Item> spawnedItems = new ArrayList<>();
+        public final List<Item> incineratedItems = new ArrayList<>();
+    }
+
+    /**
+     * Ngẫu nhiên chọn loại vật phẩm rơi ra theo tỉ lệ cân bằng.
+     */
+    public static ItemType randomItemType() {
+        int roll = random.nextInt(100);
+        if (roll < 25) return ItemType.BOMB_RANGE;   // 25% Thuốc tăng tầm nổ
+        if (roll < 50) return ItemType.BOMB_COUNT;   // 25% Thuốc tăng số lượng bom
+        if (roll < 70) return ItemType.SPEED_BOOST;  // 20% Thuốc tăng tốc độ di chuyển (+10%)
+        if (roll < 85) return ItemType.SHIELD;       // 15% Khiên đỡ 1 lần sát thương
+        return ItemType.WEAPON_GUN;                  // 15% Vũ khí có số lần sử dụng (Bomb IT style)
     }
 
     /**
@@ -30,10 +52,13 @@ public class ExplosionHandler {
      * @param map bản đồ game
      * @param bombs danh sách các quả bom trên sân (để kích nổ dây chuyền)
      * @param players danh sách tất cả người chơi
+     * @param existingItems danh sách vật phẩm đang nằm trên sàn
      * @param bomb quả bom phát nổ
-     * @return ExplosionResult chứa danh sách ô lửa, gạch vỡ, người chơi bị hạ gục
+     * @param itemCounter bộ đếm ID sinh vật phẩm
+     * @return ExplosionResult chứa danh sách ô lửa, gạch vỡ, vật phẩm sinh ra, vật phẩm cháy, người chơi bị hạ gục/được khiên cứu
      */
-    public static ExplosionResult processExplosion(GameMap map, List<Bomb> bombs, List<Player> players, Bomb bomb) {
+    public static ExplosionResult processExplosion(GameMap map, List<Bomb> bombs, List<Player> players,
+                                                  List<Item> existingItems, Bomb bomb, AtomicInteger itemCounter) {
         ExplosionResult result = new ExplosionResult();
         Set<Point> flameSet = new HashSet<>();
 
@@ -71,6 +96,14 @@ public class ExplosionHandler {
                     flameSet.add(p);
                     result.destroyedBricks.add(p);
                     map.destroyBrick(nx, ny);
+
+                    // Tỉ lệ rơi vật phẩm khi gạch vỡ
+                    if (random.nextDouble() < GameConstants.ITEM_DROP_RATE && itemCounter != null) {
+                        ItemType droppedType = randomItemType();
+                        String itemId = "IT" + itemCounter.getAndIncrement();
+                        Item newItem = new Item(itemId, droppedType, nx, ny);
+                        result.spawnedItems.add(newItem);
+                    }
                     break;
                 }
 
@@ -89,7 +122,17 @@ public class ExplosionHandler {
 
         result.flameCells.addAll(flameSet);
 
-        // 3. Kiểm tra va chạm với các Player
+        // 3. Thiêu hủy các vật phẩm đang nằm trên sàn nếu bị tia lửa quét trúng
+        if (existingItems != null) {
+            for (Item item : existingItems) {
+                Point itemPos = new Point(item.getGridX(), item.getGridY());
+                if (flameSet.contains(itemPos)) {
+                    result.incineratedItems.add(item);
+                }
+            }
+        }
+
+        // 4. Kiểm tra va chạm với các Player
         for (Player player : players) {
             if (!player.isAlive()) continue;
 
@@ -98,16 +141,21 @@ public class ExplosionHandler {
 
             for (Point flame : result.flameCells) {
                 if (flame.x == px && flame.y == py) {
-                    player.setAlive(false);
-                    result.killedPlayers.add(player);
+                    boolean killed = player.takeDamage();
+                    if (killed) {
+                        result.killedPlayers.add(player);
 
-                    // Cộng điểm nếu tiêu diệt được đối thủ khác mình
-                    if (player.getId() != bomb.getOwnerId()) {
-                        for (Player p : players) {
-                            if (p.getId() == bomb.getOwnerId()) {
-                                p.addScore(100);
+                        // Cộng điểm nếu tiêu diệt được đối thủ khác mình
+                        if (player.getId() != bomb.getOwnerId()) {
+                            for (Player p : players) {
+                                if (p.getId() == bomb.getOwnerId()) {
+                                    p.addScore(100);
+                                }
                             }
                         }
+                    } else {
+                        // Người chơi có khiên đỡ 1 lần sát thương!
+                        result.shieldSavedPlayers.add(player);
                     }
                     break;
                 }
