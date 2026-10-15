@@ -12,6 +12,8 @@ public class GameMap {
     private final int width;
     private final int height;
     private final int[][] grid;
+    private int initialSoftBricks = 0;
+    private int remainingSoftBricks = 0;
 
     public GameMap() {
         this(GameConstants.MAP_WIDTH, GameConstants.MAP_HEIGHT);
@@ -72,6 +74,17 @@ public class GameMap {
                 }
             }
         }
+
+        // Đếm tổng số ô gạch mềm ban đầu
+        initialSoftBricks = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (grid[y][x] == TileType.SOFT_BRICK.getCode()) {
+                    initialSoftBricks++;
+                }
+            }
+        }
+        remainingSoftBricks = initialSoftBricks;
     }
 
     private void markSafeZone(boolean[][] safe, int cx, int cy) {
@@ -111,9 +124,28 @@ public class GameMap {
     public boolean destroyBrick(int x, int y) {
         if (getTile(x, y) == TileType.SOFT_BRICK.getCode()) {
             grid[y][x] = TileType.EMPTY.getCode();
+            if (remainingSoftBricks > 0) {
+                remainingSoftBricks--;
+            }
             return true;
         }
         return false;
+    }
+
+    public int getInitialSoftBricks() {
+        return initialSoftBricks;
+    }
+
+    public int getRemainingSoftBricks() {
+        return remainingSoftBricks;
+    }
+
+    /**
+     * Kiểm tra xem tỉ lệ gạch mềm còn lại có dưới ngưỡng cho trước (ví dụ 0.30 = 30%) hay không.
+     */
+    public boolean isSoftBricksBelowThreshold(double thresholdRatio) {
+        if (initialSoftBricks <= 0) return false;
+        return ((double) remainingSoftBricks / initialSoftBricks) < thresholdRatio;
     }
 
     /**

@@ -15,13 +15,19 @@ public class Player {
     private Direction lastFacingDirection;
     private boolean alive;
     private int score;
-    private int maxBombs;
-    private int currentBombs;
+    private int maxBombs;       // Số lượng bom tối đa có thể sở hữu/đặt cùng lúc
+    private int availableBombs; // Số lượng bom hiện tại có thể đặt
     private int bombRadius;
     private double speed;
     private boolean hasShield;
     private ItemType weapon;
     private int weaponAmmo;
+    private int kills;
+    private int pickedBombRange;
+    private int pickedBombCount;
+    private int pickedSpeed;
+    private int pickedShield;
+    private int pickedWeapon;
 
     public Player(int id, String name, double startX, double startY) {
         this.id = id;
@@ -33,12 +39,18 @@ public class Player {
         this.alive = true;
         this.score = 0;
         this.maxBombs = 1;
-        this.currentBombs = 0;
-        this.bombRadius = 2;
+        this.availableBombs = 1;
+        this.bombRadius = com.bomberman.common.GameConstants.DEFAULT_BOMB_RADIUS;
         this.speed = com.bomberman.common.GameConstants.PLAYER_SPEED;
         this.hasShield = false;
         this.weapon = null;
         this.weaponAmmo = 0;
+        this.kills = 0;
+        this.pickedBombRange = 0;
+        this.pickedBombCount = 0;
+        this.pickedSpeed = 0;
+        this.pickedShield = 0;
+        this.pickedWeapon = 0;
     }
 
     public int getId() {
@@ -107,17 +119,28 @@ public class Player {
         this.score += points;
     }
 
+    public int getKills() {
+        return kills;
+    }
+
+    public void addKill() {
+        this.kills++;
+        addScore(100);
+    }
+
     public boolean canPlaceBomb() {
-        return alive && currentBombs < maxBombs;
+        return alive && availableBombs > 0;
     }
 
     public void onBombPlaced() {
-        currentBombs++;
+        if (availableBombs > 0) {
+            availableBombs--;
+        }
     }
 
     public void onBombExploded() {
-        if (currentBombs > 0) {
-            currentBombs--;
+        if (availableBombs < maxBombs) {
+            availableBombs++;
         }
     }
 
@@ -139,6 +162,14 @@ public class Player {
 
     public int getMaxBombs() {
         return maxBombs;
+    }
+
+    public int getAvailableBombs() {
+        return availableBombs;
+    }
+
+    public int getCurrentPlacedBombs() {
+        return maxBombs - availableBombs;
     }
 
     public boolean hasShield() {
@@ -167,15 +198,19 @@ public class Player {
         switch (type) {
             case BOMB_RANGE:
                 this.bombRadius++;
+                this.pickedBombRange++;
                 return true;
 
             case SPEED_BOOST:
                 this.speed = Math.min(com.bomberman.common.GameConstants.MAX_PLAYER_SPEED,
                         this.speed * (1.0 + com.bomberman.common.GameConstants.SPEED_BOOST_PERCENT));
+                this.pickedSpeed++;
                 return true;
 
             case BOMB_COUNT:
                 this.maxBombs++;
+                this.availableBombs++;
+                this.pickedBombCount++;
                 return true;
 
             case SHIELD:
@@ -184,11 +219,13 @@ public class Player {
                     return false;
                 }
                 this.hasShield = true;
+                this.pickedShield++;
                 return true;
 
             case WEAPON_GUN:
                 this.weapon = ItemType.WEAPON_GUN;
                 this.weaponAmmo = com.bomberman.common.GameConstants.WEAPON_DEFAULT_AMMO;
+                this.pickedWeapon++;
                 return true;
 
             default:
@@ -226,12 +263,24 @@ public class Player {
         return false;
     }
 
+    public int getPickedBombRange() { return pickedBombRange; }
+    public int getPickedBombCount() { return pickedBombCount; }
+    public int getPickedSpeed() { return pickedSpeed; }
+    public int getPickedShield() { return pickedShield; }
+    public int getPickedWeapon() { return pickedWeapon; }
+
+    public String toItemsSummaryString() {
+        return String.format("%d,%d,%d,%d,%d",
+                pickedBombRange, pickedBombCount, pickedSpeed, pickedShield, pickedWeapon);
+    }
+
     /**
      * Định dạng chuỗi tóm tắt người chơi để gửi trong gói tin STATE.
-     * Cú pháp: id,x,y,alive,score,direction,hasShield,weaponAmmo
+     * Cú pháp: id,x,y,alive,score,direction,hasShield,weaponAmmo,kills,range,count,speed,shield,gun
      */
     public String toStateString() {
-        return String.format(java.util.Locale.US, "%d,%.2f,%.2f,%d,%d,%s,%d,%d",
-                id, x, y, alive ? 1 : 0, score, direction.name(), hasShield ? 1 : 0, weaponAmmo);
+        return String.format(java.util.Locale.US, "%d,%.2f,%.2f,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d",
+                id, x, y, alive ? 1 : 0, score, direction.name(), hasShield ? 1 : 0, weaponAmmo,
+                kills, pickedBombRange, pickedBombCount, pickedSpeed, pickedShield, pickedWeapon);
     }
 }

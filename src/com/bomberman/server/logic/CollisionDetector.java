@@ -25,18 +25,22 @@ public class CollisionDetector {
      * @return true nếu vị trí mới hoàn toàn hợp lệ
      */
     public static boolean canMove(GameMap map, List<Bomb> bombs, double oldX, double oldY, double newX, double newY) {
+        // Tọa độ tâm nhân vật nằm ở giữa ô: (x + 0.5, y + 0.5)
+        double centerX = newX + 0.5;
+        double centerY = newY + 0.5;
+
+        // Bán kính va chạm 0.27 (đã giảm 10% để dễ luồn lách qua các góc cua và khe gạch)
+        double halfSize = 0.27;
+
+        double minX = centerX - halfSize;
+        double maxX = centerX + halfSize;
+        double minY = centerY - halfSize;
+        double maxY = centerY + halfSize;
+
         // Kiểm tra biên bản đồ
-        if (newX < 0 || newX >= map.getWidth() || newY < 0 || newY >= map.getHeight()) {
+        if (minX < 0 || maxX >= map.getWidth() || minY < 0 || maxY >= map.getHeight()) {
             return false;
         }
-
-        // Kích thước nửa thân nhân vật để kiểm tra va chạm góc (Bounding Box 0.55 ô)
-        double halfSize = 0.28;
-
-        double minX = newX - halfSize;
-        double maxX = newX + halfSize;
-        double minY = newY - halfSize;
-        double maxY = newY + halfSize;
 
         int leftCol = (int) Math.floor(minX);
         int rightCol = (int) Math.floor(maxX);
@@ -54,7 +58,7 @@ public class CollisionDetector {
                 }
 
                 // Kiểm tra va chạm với quả bom
-                if (isBlockedByBomb(bombs, oldX, oldY, col, row)) {
+                if (isBlockedByBomb(bombs, oldX, oldY, col, row, halfSize)) {
                     return false;
                 }
             }
@@ -65,21 +69,28 @@ public class CollisionDetector {
 
     /**
      * Kiểm tra va chạm với Bom:
-     * - Nếu tại ô (col, row) có bom, nhưng vị trí cũ (oldX, oldY) người chơi cũng đang đứng trúng ô đó
+     * - Nếu tại vị trí cũ (oldX, oldY) nhân vật đã đang đứng chạm vào ô bom này rồi
      *   (người chơi vừa đặt bom xong và đang bước ra) -> CHO PHÉP ĐI TIẾP.
      * - Nếu người chơi ở ngoài ô bom muốn đi vào -> CHẶN LẠI.
      */
-    private static boolean isBlockedByBomb(List<Bomb> bombs, double oldX, double oldY, int col, int row) {
+    private static boolean isBlockedByBomb(List<Bomb> bombs, double oldX, double oldY, int col, int row, double halfSize) {
         if (bombs == null) return false;
 
         for (Bomb bomb : bombs) {
             if (bomb.getGridX() == col && bomb.getGridY() == row && !bomb.isExploded()) {
-                // Kiểm tra xem vị trí cũ có đang ở trong ô bom này không
-                int oldGridX = (int) Math.round(oldX);
-                int oldGridY = (int) Math.round(oldY);
+                // Kiểm tra xem vị trí cũ (oldX, oldY) có đang đè/lấn vào ô bom này không
+                double oldCenterX = oldX + 0.5;
+                double oldCenterY = oldY + 0.5;
+                double oldMinX = oldCenterX - halfSize;
+                double oldMaxX = oldCenterX + halfSize;
+                double oldMinY = oldCenterY - halfSize;
+                double oldMaxY = oldCenterY + halfSize;
 
-                if (oldGridX == col && oldGridY == row) {
-                    // Đang bước ra khỏi ô bom vừa đặt -> Cho phép
+                boolean oldOverlapped = (oldMinX < (col + 1.0) && oldMaxX > col &&
+                                         oldMinY < (row + 1.0) && oldMaxY > row);
+
+                if (oldOverlapped) {
+                    // Đang bước ra khỏi ô bom vừa đặt -> Cho phép tiếp tục đi ra
                     return false;
                 }
                 // Đi từ ô khác vào ô có bom -> Chặn lại

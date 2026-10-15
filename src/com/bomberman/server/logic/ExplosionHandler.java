@@ -39,11 +39,11 @@ public class ExplosionHandler {
      */
     public static ItemType randomItemType() {
         int roll = random.nextInt(100);
-        if (roll < 25) return ItemType.BOMB_RANGE;   // 25% Thuốc tăng tầm nổ
-        if (roll < 50) return ItemType.BOMB_COUNT;   // 25% Thuốc tăng số lượng bom
-        if (roll < 70) return ItemType.SPEED_BOOST;  // 20% Thuốc tăng tốc độ di chuyển (+10%)
-        if (roll < 85) return ItemType.SHIELD;       // 15% Khiên đỡ 1 lần sát thương
-        return ItemType.WEAPON_GUN;                  // 15% Vũ khí có số lần sử dụng (Bomb IT style)
+        if (roll < 25) return ItemType.BOMB_RANGE;   // 25% Thuốc tăng tầm nổ (Trọng số 25)
+        if (roll < 50) return ItemType.BOMB_COUNT;   // 25% Thuốc tăng số lượng bom (Trọng số 25)
+        if (roll < 75) return ItemType.SPEED_BOOST;  // 25% Thuốc tăng tốc độ di chuyển (Trọng số 25)
+        if (roll < 90) return ItemType.WEAPON_GUN;   // 15% Súng vũ khí Laser/Rocket (Trọng số 15)
+        return ItemType.SHIELD;                      // 10% Khiên bảo vệ (Trọng số 10)
     }
 
     /**
@@ -97,8 +97,12 @@ public class ExplosionHandler {
                     result.destroyedBricks.add(p);
                     map.destroyBrick(nx, ny);
 
-                    // Tỉ lệ rơi vật phẩm khi gạch vỡ
-                    if (random.nextDouble() < GameConstants.ITEM_DROP_RATE && itemCounter != null) {
+                    // Tỉ lệ rơi vật phẩm khi gạch vỡ: 60% khi còn dưới 30% số gạch, bình thường 45%
+                    double dropRate = map.isSoftBricksBelowThreshold(GameConstants.LATE_GAME_BRICK_THRESHOLD)
+                            ? GameConstants.ITEM_DROP_RATE_LATE_GAME
+                            : GameConstants.ITEM_DROP_RATE;
+
+                    if (random.nextDouble() < dropRate && itemCounter != null) {
                         ItemType droppedType = randomItemType();
                         String itemId = "IT" + itemCounter.getAndIncrement();
                         Item newItem = new Item(itemId, droppedType, nx, ny);

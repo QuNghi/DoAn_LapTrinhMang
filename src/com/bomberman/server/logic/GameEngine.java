@@ -34,6 +34,8 @@ public class GameEngine {
     private final AtomicInteger bombCounter = new AtomicInteger(1);
     private final AtomicInteger itemCounter = new AtomicInteger(1);
 
+    // 0=WAITING (chờ start/chờ đủ 4 người), 1=COUNTDOWN (đếm ngược 3s), 2=PLAYING, 3=ENDED
+    private volatile int gameState = 0;
     private volatile boolean gameStarted = false;
     private volatile boolean gameOver = false;
     private long currentTick = 0;
@@ -148,21 +150,48 @@ public class GameEngine {
                     item.getId(), item.getType().getId(), item.getGridX(), item.getGridY()), address, port);
         }
 
-        // Nếu phòng đạt đủ người chơi (hoặc từ 2 người trở lên) thì kích hoạt bắt đầu game
-        if (!gameStarted && sessionsById.size() >= GameConstants.MAX_PLAYERS) {
+        // Nếu phòng đạt đủ 4 người chơi thì kích hoạt bắt đầu game
+        if (gameState == 0 && sessionsById.size() >= GameConstants.MAX_PLAYERS) {
             startGame();
         }
     }
 
     public synchronized void startGame() {
-        if (gameStarted) return;
-        gameStarted = true;
+        if (gameState != 0) return; // Chỉ bắt đầu khi đang ở WAITING
+        gameState = 1; // COUNTDOWN
         gameOver = false;
-        System.out.println("[GAME-ENGINE] >>> TRẬN ĐẤU CHÍNH THỨC BẮT ĐẦU VỚI " + sessionsById.size() + " NGƯỜI CHƠI! <<<");
-        server.broadcast("GAME_START|" + sessionsById.size(), sessionsById.values());
+        System.out.println("[GAME-ENGINE] >>> BẮT ĐẦU ĐẾM NGƯỢC 3 GIÂY TRƯỚC TRẬN ĐẤU! <<<");
+
+        // Broadcast đếm ngược ban đầu
+        server.broadcast("COUNTDOWN|3", sessionsById.values());
+
+        ScheduledExecutorService countdownExec = Executors.newSingleThreadScheduledExecutor();
+        final int[] remainingSeconds = {2};
+
+        countdownExec.scheduleAtFixedRate(() -> {
+            try {
+                if (remainingSeconds[0] > 0) {
+                    server.broadcast("COUNTDOWN|" + remainingSeconds[0], sessionsById.values());
+                    System.out.printf("[GAME-ENGINE] Đếm ngược: %d...%n", remainingSeconds[0]);
+                    remainingSeconds[0]--;
+                } else {
+                    // Hết 3 giây -> Chính thức START!
+                    server.broadcast("COUNTDOWN|0|START", sessionsById.values());
+                    server.broadcast("GAME_START|" + sessionsById.size(), sessionsById.values());
+                    gameState = 2; // PLAYING
+                    gameStarted = true;
+                    System.out.println("[GAME-ENGINE] >>> TRẬN ĐẤU CHÍNH THỨC BẮT ĐẦU! (CHO PHÉP DI CHUYỂN & ĐẶT BOM) <<<");
+                    countdownExec.shutdown();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }, 1, 1, TimeUnit.SECONDS);
     }
 
     private void handleMove(String dirStr, String sessionKey) {
+        if (gameState != 2) return; // Chỉ nhận lệnh di chuyển khi trận đấu đang diễn ra (PLAYING)
+
         PlayerSession session = sessionsByAddress.get(sessionKey);
         if (session == null) return;
         session.updateHeartbeat();
@@ -171,10 +200,16 @@ public class GameEngine {
         if (!player.isAlive()) return;
 
         Direction direction = Direction.fromString(dirStr);
-        player.setDirection(direction);
+        if (direction != player.getDirection()) {
+            player.setDirection(direction);
+            System.out.printf("[GAME-ENGINE] Player %d (%s) di chuyển: %s | Tọa độ hiện tại: (%.2f, %.2f)%n",
+                    player.getId(), player.getName(), direction, player.getX(), player.getY());
+        }
     }
 
     private void handlePlaceBomb(String sessionKey) {
+        if (gameState != 2) return; // Chỉ nhận lệnh đặt bom khi trận đấu đang diễn ra (PLAYING)
+
         PlayerSession session = sessionsByAddress.get(sessionKey);
         if (session == null) return;
         session.updateHeartbeat();
@@ -197,8 +232,8 @@ public class GameEngine {
         bombs.add(bomb);
         player.onBombPlaced();
 
-        System.out.printf("[GAME-ENGINE] Player %d (%s) đặt quả bom %s tại ô (%d, %d)%n",
-                player.getId(), player.getName(), bombId, gx, gy);
+        System.out.printf("[GAME-ENGINE] Player %d (%s) đặt quả bom %s tại ô (%d, %d) | Còn %d/%d quả có thể đặt%n",
+                player.getId(), player.getName(), bombId, gx, gy, player.getAvailableBombs(), player.getMaxBombs());
     }
 
     private void handleQuit(String sessionKey) {
@@ -208,7 +243,11 @@ public class GameEngine {
             session.getPlayer().setAlive(false);
             System.out.printf("[GAME-ENGINE] Người chơi %s (ID=%d) đã thoát game.%n",
                     session.getPlayer().getName(), session.getPlayer().getId());
+            server.broadcast("PLAYER_LEFT|" + session.getPlayer().getId() + "|" + session.getPlayer().getName(), sessionsById.values());
             server.broadcast("PLAYER_DIED|" + session.getPlayer().getId() + "|0", sessionsById.values());
+            if (gameState == 2 && !gameOver) {
+                checkGameOver();
+            }
         }
     }
 
@@ -260,6 +299,7 @@ public class GameEngine {
     }
 
     private void updatePlayerMovement() {
+        if (gameState != 2) return; // Chỉ cập nhật di chuyển khi đang PLAYING
         for (PlayerSession session : sessionsById.values()) {
             Player p = session.getPlayer();
             if (!p.isAlive()) continue;
@@ -323,15 +363,28 @@ public class GameEngine {
             }
         }
 
-        for (Bomb bomb : explodedBombs) {
+        // Duyệt danh sách các quả bom phát nổ (hỗ trợ nổ dây chuyền cascade)
+        for (int bIdx = 0; bIdx < explodedBombs.size(); bIdx++) {
+            Bomb bomb = explodedBombs.get(bIdx);
+
             // Xử lý nổ (bao gồm rơi vật phẩm, phá hủy gạch, phá khiên / diệt player, cháy vật phẩm trên sàn)
             ExplosionHandler.ExplosionResult result = ExplosionHandler.processExplosion(
                     map, bombs, allPlayers, items, bomb, itemCounter);
+
+            // Nếu có bom khác bị nổ dây chuyền, thêm vào hàng đợi nổ ngay trong tick này
+            for (Bomb triggered : result.triggeredBombs) {
+                if (!explodedBombs.contains(triggered)) {
+                    explodedBombs.add(triggered);
+                }
+            }
 
             // Hoàn lại số lượng bom cho chủ nhân
             PlayerSession ownerSession = sessionsById.get(bomb.getOwnerId());
             if (ownerSession != null) {
                 ownerSession.getPlayer().onBombExploded();
+                System.out.printf("[GAME-ENGINE] Quả bom %s nổ -> Hoàn lại 1 bom cho Player %d (%s) (Hiện có: %d/%d quả có thể đặt)%n",
+                        bomb.getId(), ownerSession.getPlayer().getId(), ownerSession.getPlayer().getName(),
+                        ownerSession.getPlayer().getAvailableBombs(), ownerSession.getPlayer().getMaxBombs());
             }
 
             // Xây dựng chuỗi danh sách các ô lửa nổ: x1,y1;x2,y2;...
@@ -376,6 +429,10 @@ public class GameEngine {
 
             // Broadcast thông báo người chơi bị tiêu diệt
             for (Player deadPlayer : result.killedPlayers) {
+                PlayerSession killerSession = sessionsById.get(bomb.getOwnerId());
+                if (killerSession != null && deadPlayer.getId() != bomb.getOwnerId()) {
+                    killerSession.getPlayer().addKill();
+                }
                 System.out.printf("[GAME-ENGINE] Người chơi %s (ID=%d) đã bị tiêu diệt bởi bom của Player %d!%n",
                         deadPlayer.getName(), deadPlayer.getId(), bomb.getOwnerId());
                 server.broadcast(String.format("PLAYER_DIED|%d|%d", deadPlayer.getId(), bomb.getOwnerId()), sessionsById.values());
@@ -430,7 +487,7 @@ public class GameEngine {
                     hitTargetId = target.getId();
                     boolean killed = target.takeDamage();
                     if (killed) {
-                        shooter.addScore(100);
+                        shooter.addKill();
                         System.out.printf("[GAME-ENGINE] Player %d dùng súng bắn hạ Player %d!%n", shooter.getId(), target.getId());
                         server.broadcast(String.format("PLAYER_DIED|%d|%d", target.getId(), shooter.getId()), sessionsById.values());
                     } else {
@@ -507,13 +564,16 @@ public class GameEngine {
 
         if (aliveCount <= 1 && sessionsById.size() > 1) {
             gameOver = true;
+            gameState = 3; // ENDED: Dừng nhận gói tin từ client
             if (lastSurvivor != null) {
                 System.out.printf("[GAME-ENGINE] >>> TRẬN ĐẤU KẾT THÚC! NGƯỜI CHIẾN THẮNG LÀ: %s (ID=%d) <<<%n",
                         lastSurvivor.getName(), lastSurvivor.getId());
-                server.broadcast(String.format("GAME_OVER|%d|%s", lastSurvivor.getId(), lastSurvivor.getName()), sessionsById.values());
+                // Gửi thông tin đầy đủ về người thắng cuộc và vật phẩm nhặt được
+                server.broadcast(String.format("GAME_OVER|%d|%s|%s",
+                        lastSurvivor.getId(), lastSurvivor.getName(), lastSurvivor.toItemsSummaryString()), sessionsById.values());
             } else {
                 System.out.println("[GAME-ENGINE] >>> TRẬN ĐẤU KẾT THÚC HÒA! KHÔNG CÒN AI SỐNG SÓT! <<<");
-                server.broadcast("GAME_OVER|0|NONE", sessionsById.values());
+                server.broadcast("GAME_OVER|0|NONE|0,0,0,0,0", sessionsById.values());
             }
         }
     }
