@@ -40,7 +40,8 @@ public class ServerMain {
             if (!GraphicsEnvironment.isHeadless()) {
                 SwingUtilities.invokeLater(() -> {
                     try {
-                        UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+                        // Sử dụng Metal L&F để đảm bảo màu sắc tùy chỉnh hoạt động đúng
+                    UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
                     } catch (Exception ignored) {}
                     ServerFrame frame = new ServerFrame(roomManager, serverPort);
                     frame.setVisible(true);

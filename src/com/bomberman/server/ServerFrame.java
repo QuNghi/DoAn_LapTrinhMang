@@ -95,10 +95,10 @@ public class ServerFrame extends JFrame {
         JPanel badges = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 2));
         badges.setOpaque(false);
 
-        lblStatus = createPillBadge("🟢 TRỰC TUYẾN", new Color(0xDC, 0xFC, 0xE7), ACCENT_GREEN);
-        lblPort = createPillBadge("CỔNG: " + port, new Color(0xDB, 0xEA, 0xFE), ACCENT_BLUE);
-        lblRoomCount = createPillBadge("PHÒNG: 0", new Color(0xF3, 0xE8, 0xFF), ACCENT_PURPLE);
-        lblPlayerCount = createPillBadge("NGƯỜI CHƠI: 0", new Color(0xFE, 0xF3, 0xC7), ACCENT_AMBER);
+        lblStatus = createPillBadge("[ON] TRUC TUYEN", new Color(0xDC, 0xFC, 0xE7), ACCENT_GREEN);
+        lblPort = createPillBadge("CONG: " + port, new Color(0xDB, 0xEA, 0xFE), ACCENT_BLUE);
+        lblRoomCount = createPillBadge("PHONG: 0", new Color(0xF3, 0xE8, 0xFF), ACCENT_PURPLE);
+        lblPlayerCount = createPillBadge("NGUOI CHOI: 0", new Color(0xFE, 0xF3, 0xC7), ACCENT_AMBER);
 
         badges.add(lblStatus);
         badges.add(lblPort);
@@ -119,18 +119,18 @@ public class ServerFrame extends JFrame {
         JPanel leftPanel = new JPanel(new BorderLayout(0, 8));
         leftPanel.setOpaque(false);
 
-        JLabel roomsTitle = new JLabel("📋 DANH SÁCH PHÒNG CHƠI (ROOMS)");
+        JLabel roomsTitle = new JLabel("[=] DANH SACH PHONG CHOI (ROOMS)");
         roomsTitle.setFont(new Font("Segoe UI", Font.BOLD, 13));
         roomsTitle.setForeground(TEXT_PRI);
         leftPanel.add(roomsTitle, BorderLayout.NORTH);
 
-        String[] playerCols = {"ID", "Tên Người Chơi", "Vai Trò", "Trạng Thái", "Vũ Khí", "Địa Chỉ IP:Port"};
+        String[] playerCols = {"ID", "Ten Nguoi Choi", "Vai Tro", "Trang Thai", "Vu Khi", "Dia Chi IP:Port"};
         playersModel = new DefaultTableModel(playerCols, 0) {
             @Override public boolean isCellEditable(int row, int col) { return false; }
         };
         playersTable = createStyledTable(playersModel, false);
 
-        String[] roomCols = {"STT", "Mã Phòng", "Tên Phòng", "Trạng Thái", "Số Người", "Chủ Phòng", "Bản Đồ", "Thời Gian"};
+        String[] roomCols = {"STT", "Ma Phong", "Ten Phong", "Trang Thai", "So Nguoi", "Chu Phong", "Ban Do", "Thoi Gian"};
         roomsModel = new DefaultTableModel(roomCols, 0) {
             @Override public boolean isCellEditable(int row, int col) { return false; }
         };
@@ -157,29 +157,29 @@ public class ServerFrame extends JFrame {
         JPanel roomActionRow = new JPanel(new BorderLayout(10, 0));
         roomActionRow.setOpaque(false);
 
-        JButton btnDeleteRoom = createButton("🗑 Xóa Phòng Treo", ACCENT_RED, Color.WHITE);
-        btnDeleteRoom.setToolTipText("Xóa phòng chỉ định khi bị treo hoặc bỏ hoang để giải phóng tài nguyên hệ thống");
+        JButton btnDeleteRoom = createButton("[DEL] Xoa Phong Treo", ACCENT_RED, Color.WHITE);
+        btnDeleteRoom.setToolTipText("Xoa phong chi dinh khi bi treo hoac bo hoang de giai phong tai nguyen he thong");
         btnDeleteRoom.addActionListener(e -> {
             if (selectedRoomCode != null) {
                 int confirm = JOptionPane.showConfirmDialog(
                         this,
-                        "Bạn có chắc muốn xóa phòng [" + selectedRoomCode + "] không?\nThao tác này sẽ ngắt kết nối các người chơi trong phòng (nếu có).",
-                        "Xác nhận xóa phòng",
+                        "Ban co chac muon xoa phong [" + selectedRoomCode + "] khong?\nThao tac nay se ngat ket noi cac nguoi choi trong phong (neu co).",
+                        "Xac nhan xoa phong",
                         JOptionPane.YES_NO_OPTION,
                         JOptionPane.WARNING_MESSAGE
                 );
                 if (confirm == JOptionPane.YES_OPTION) {
                     roomManager.deleteRoom(selectedRoomCode);
-                    log("Đã giải phóng phòng treo: " + selectedRoomCode);
+                    log("Da giai phong phong treo: " + selectedRoomCode);
                     selectedRoomCode = null;
                     refreshRoomsTable();
                 }
             } else {
-                JOptionPane.showMessageDialog(this, "Vui lòng chọn phòng cần xóa trong danh sách!");
+                JOptionPane.showMessageDialog(this, "Vui long chon phong can xoa trong danh sach!");
             }
         });
 
-        JLabel serverHintLbl = new JLabel("💡 Server chỉ quản trị xóa phòng rác. Quyền bắt đầu, kick người chơi do Client Chủ phòng xử lý.");
+        JLabel serverHintLbl = new JLabel("[i] Server chi quan tri xoa phong rac. Quyen bat dau, kick nguoi choi do Client Chu phong xu ly.");
         serverHintLbl.setFont(new Font("Segoe UI", Font.ITALIC, 11));
         serverHintLbl.setForeground(TEXT_MUTED);
 
@@ -193,7 +193,7 @@ public class ServerFrame extends JFrame {
         JPanel rightPanel = new JPanel(new BorderLayout(0, 8));
         rightPanel.setOpaque(false);
 
-        JLabel playersTitle = new JLabel("👥 NGƯỜI CHƠI TRONG PHÒNG ĐƯỢC CHỌN");
+        JLabel playersTitle = new JLabel("[P] NGUOI CHOI TRONG PHONG DUOC CHON");
         playersTitle.setFont(new Font("Segoe UI", Font.BOLD, 13));
         playersTitle.setForeground(TEXT_PRI);
         rightPanel.add(playersTitle, BorderLayout.NORTH);
@@ -206,7 +206,7 @@ public class ServerFrame extends JFrame {
         // Chú thích phân quyền phía dưới bảng người chơi
         JPanel playerNoteRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 4));
         playerNoteRow.setOpaque(false);
-        JLabel clientControlLbl = new JLabel("👑 Chủ phòng (Client Host) có quyền kick thành viên trực tiếp trong phòng chờ.");
+        JLabel clientControlLbl = new JLabel("[HOST] Chu phong (Client Host) co quyen kick thanh vien truc tiep trong phong cho.");
         clientControlLbl.setFont(new Font("Segoe UI", Font.ITALIC, 11));
         clientControlLbl.setForeground(TEXT_MUTED);
         playerNoteRow.add(clientControlLbl);
@@ -221,7 +221,7 @@ public class ServerFrame extends JFrame {
         botPanel.setOpaque(false);
         botPanel.setPreferredSize(new Dimension(800, 150));
 
-        JLabel logTitle = new JLabel("📜 NHẬT KÝ HOẠT ĐỘNG (EVENT LOG)");
+        JLabel logTitle = new JLabel("[LOG] NHAT KY HOAT DONG (EVENT LOG)");
         logTitle.setFont(new Font("Segoe UI", Font.BOLD, 12));
         logTitle.setForeground(TEXT_PRI);
         botPanel.add(logTitle, BorderLayout.NORTH);
@@ -282,8 +282,8 @@ public class ServerFrame extends JFrame {
         Collection<Room> rooms = roomManager.getAllRooms();
         int totalPlayers = roomManager.getTotalPlayers();
 
-        lblRoomCount.setText("PHÒNG: " + rooms.size());
-        lblPlayerCount.setText("NGƯỜI CHƠI: " + totalPlayers);
+        lblRoomCount.setText("PHONG: " + rooms.size());
+        lblPlayerCount.setText("NGUOI CHOI: " + totalPlayers);
 
         String currentSelected = selectedRoomCode;
         roomsModel.setRowCount(0);
@@ -330,9 +330,9 @@ public class ServerFrame extends JFrame {
 
         for (PlayerSession ps : room.getSessions()) {
             Player p = ps.getPlayer();
-            String role = ps.isHost() ? "👑 Chủ phòng" : "Thành viên";
-            String status = p.isAlive() ? "✔ Sống" : "☠ Đã bị loại";
-            String weapon = p.hasWeapon() ? "🔫 " + p.getWeaponAmmo() + " đạn" : "💣 Bom";
+            String role = ps.isHost() ? "[HOST] Chu phong" : "Thanh vien";
+            String status = p.isAlive() ? "[OK] Song" : "[X] Da bi loai";
+            String weapon = p.hasWeapon() ? "[GUN] " + p.getWeaponAmmo() + " dan" : "[BOM] Bom";
             String addr = ps.getAddress().getHostAddress() + ":" + ps.getPort();
 
             playersModel.addRow(new Object[]{
@@ -364,6 +364,7 @@ public class ServerFrame extends JFrame {
         btn.setFont(new Font("Segoe UI", Font.BOLD, 12));
         btn.setForeground(fg);
         btn.setBackground(bg);
+        btn.setOpaque(true);  // Bắt buộc để Metal L&F vẽ màu nền
         btn.setFocusPainted(false);
         btn.setBorder(new CompoundBorder(
                 new LineBorder(bg.darker(), 1, true),
@@ -407,11 +408,11 @@ public class ServerFrame extends JFrame {
                         c.setForeground(ACCENT_BLUE);
                     } else if (strVal.equals("COUNTDOWN")) {
                         c.setForeground(ACCENT_AMBER);
-                    } else if (strVal.equals("PLAYING") || strVal.equals("✔ Sống")) {
+                    } else if (strVal.equals("PLAYING") || strVal.equals("[OK] Song")) {
                         c.setForeground(ACCENT_GREEN);
-                    } else if (strVal.equals("ENDED") || strVal.equals("☠ Đã bị loại")) {
+                    } else if (strVal.equals("ENDED") || strVal.equals("[X] Da bi loai")) {
                         c.setForeground(ACCENT_RED);
-                    } else if (strVal.contains("👑 Chủ phòng")) {
+                    } else if (strVal.contains("[HOST] Chu phong")) {
                         c.setForeground(ACCENT_AMBER);
                         c.setFont(c.getFont().deriveFont(Font.BOLD));
                     }

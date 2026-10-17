@@ -161,12 +161,16 @@ public class GameEngine {
                 handlePlayAgain(sessionKey);
                 break;
 
+            case "READY_TOGGLE":
+                handleReadyToggle(sessionKey);
+                break;
+
             case "RESTART_VOTE":
                 if (parts.length > 1) handleRestartVote(sessionKey, parts[1].trim().toUpperCase());
                 break;
 
             default:
-                System.out.println("[GAME-ENGINE] [" + roomCode + "] Gói tin không xác định: " + message);
+                System.out.println("[GAME-ENGINE] [" + roomCode + "] Goi tin khong xac dinh: " + message);
         }
     }
 
@@ -928,13 +932,30 @@ public class GameEngine {
         StringBuilder sb = new StringBuilder();
         int i = 0;
         for (PlayerSession s : sessionsById.values()) {
+            // Định dạng mới: id:name:isHost:isReady (4 trường)
             sb.append(s.getPlayer().getId()).append(":")
               .append(s.getPlayer().getName()).append(":")
-              .append(s.isHost() ? "1" : "0");
+              .append(s.isHost() ? "1" : "0").append(":")
+              .append(s.isReady() ? "1" : "0");
             if (i < sessionsById.size() - 1) sb.append(";");
             i++;
         }
         server.broadcast("ROOM_PLAYERS|" + sb.toString(), sessionsById.values());
+    }
+
+    /**
+     * Xử lý toggle trạng thái sẵn sàng của thành viên (không áp dụng cho Host).
+     * Host luôn tính là sẵn sàng nên không cần toggle.
+     */
+    public synchronized void handleReadyToggle(String sessionKey) {
+        if (gameState != 0) return; // Chỉ cho phép khi ở trạng thái WAITING
+        PlayerSession session = sessionsByAddress.get(sessionKey);
+        if (session == null || session.isHost()) return; // Host không cần toggle
+        // Đảo trạng thái sẵn sàng
+        session.setReady(!session.isReady());
+        System.out.printf("[GAME-ENGINE] [%s] Thanh vien %s (ID=%d) doi trang thai san sang: %b%n",
+                roomCode, session.getPlayer().getName(), session.getPlayer().getId(), session.isReady());
+        broadcastRoomPlayers();
     }
 
     public void handleSetMap(String sessionKey, int mapType) {
@@ -983,6 +1004,10 @@ public class GameEngine {
 
         for (PlayerSession ps : sessionsById.values()) {
             ps.setRestartVote(null);
+            // Reset trạng thái sẵn sàng: thành viên phải xác nhận lại
+            if (!ps.isHost()) {
+                ps.setReady(false);
+            }
         }
 
         // Reset vị trí spawn người chơi và trạng thái sống

@@ -315,8 +315,14 @@ public class GameClient {
 
     /** Gửi PLAY_AGAIN khi hết trận */
     public void sendPlayAgain() {
-        System.out.println("[CLIENT-ACTION] Chơi tiếp");
+        System.out.println("[CLIENT-ACTION] Choi tiep");
         sendPacket("PLAY_AGAIN");
+    }
+
+    /** Gửi READY_TOGGLE để chuyển đổi trạng thái sẵn sàng (chỉ thành viên) */
+    public void sendReadyToggle() {
+        System.out.println("[CLIENT-ACTION] Chuyen doi trang thai san sang");
+        sendPacket("READY_TOGGLE");
     }
 
     private void handleJoinAck(String[] parts) {

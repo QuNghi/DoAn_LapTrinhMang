@@ -48,11 +48,13 @@ public class ClientGameState {
         public int id;
         public String name;
         public boolean isHost;
+        public boolean isReady; // true = thành viên đã nhấn sẵn sàng (host luôn tính là ready)
 
-        public RoomSlot(int id, String name, boolean isHost) {
+        public RoomSlot(int id, String name, boolean isHost, boolean isReady) {
             this.id = id;
             this.name = name;
             this.isHost = isHost;
+            this.isReady = isReady;
         }
     }
 
@@ -586,7 +588,8 @@ public class ClientGameState {
     }
 
     /**
-     * Xử lý ROOM_PLAYERS|id:name:isHost;... hoặc name1 [HOST];...
+     * Xử lý ROOM_PLAYERS|id:name:isHost:isReady;... hoặc name1 [HOST];...
+     * Định dạng mới gồm 4 trường: id:name:isHost:isReady
      */
     public void parseRoomPlayers(String[] parts) {
         roomPlayerNames.clear();
@@ -600,7 +603,8 @@ public class ClientGameState {
                         int id = Integer.parseInt(sub[0]);
                         String name = sub.length > 1 ? sub[1] : ("Player" + id);
                         boolean host = sub.length > 2 && "1".equals(sub[2]);
-                        roomSlots.add(new RoomSlot(id, name, host));
+                        boolean ready = sub.length > 3 && "1".equals(sub[3]);
+                        roomSlots.add(new RoomSlot(id, name, host, ready));
                         roomPlayerNames.add(name + (host ? " [HOST]" : ""));
                         setPlayerName(id, name);
                     } catch (Exception e) {

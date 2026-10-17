@@ -76,6 +76,17 @@ public class PlayerSession {
         this.restartVote = restartVote;
     }
 
+    /** Trạng thái sẵn sàng của thành viên (Host luôn tính là ready) */
+    private boolean ready = false;
+
+    public boolean isReady() {
+        return ready || isHost; // Host luôn tính là sẵn sàng
+    }
+
+    public void setReady(boolean ready) {
+        this.ready = ready;
+    }
+
     @Override
     public String toString() {
         return String.format("Session[PlayerID=%d, Name=%s, Host=%s, Room=%s, Address=%s:%d]",

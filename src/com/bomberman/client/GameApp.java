@@ -27,7 +27,7 @@ public class GameApp extends JFrame {
     private static final String SCREEN_GAME  = "GAME";
 
     public GameApp() {
-        super("💣 Bomb It Multiplayer – UDP");
+        super("Bomb It Multiplayer - UDP");
         setupWindow();
         buildScreens();
         showLobby();
@@ -106,6 +106,13 @@ public class GameApp extends JFrame {
             public void onSelectMap(int mapType) {
                 if (client != null) {
                     client.sendSetMap(mapType);
+                }
+            }
+
+            @Override
+            public void onReadyToggle() {
+                if (client != null) {
+                    client.sendReadyToggle();
                 }
             }
         });
@@ -222,7 +229,8 @@ public class GameApp extends JFrame {
         if (gamePanel != null) {
             gamePanel.stopRendering();
         }
-        setPreferredSize(new Dimension(580, 580));
+        // Tăng chiều cao để đảm bảo nút BẮT ĐẦU NGAY không bị cắt
+        setPreferredSize(new Dimension(600, 660));
         pack();
         setLocationRelativeTo(null);
 
@@ -281,7 +289,8 @@ public class GameApp extends JFrame {
 
     public static void main(String[] args) {
         try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            // Sử dụng Metal L&F để đảm bảo setForeground/setBackground được tôn trọng
+            UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
         } catch (Exception ignored) {}
 
         System.setProperty("awt.useSystemAAFontSettings", "on");
