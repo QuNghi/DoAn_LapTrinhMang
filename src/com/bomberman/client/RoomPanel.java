@@ -20,6 +20,8 @@ public class RoomPanel extends JPanel {
     public interface RoomActionCallback {
         void onStartGame();
         void onLeaveRoom();
+        void onKickPlayer(int playerId);
+        void onSelectMap(int mapType);
     }
 
     private final ClientGameState state;
@@ -28,12 +30,14 @@ public class RoomPanel extends JPanel {
     private final JLabel roomCodeLabel;
     private final JLabel hostBadgeLabel;
     private final JLabel statusLabel;
+    private final JComboBox<String> mapSelector;
     private final JButton startBtn;
     private final JButton leaveBtn;
     private final JButton copyCodeBtn;
     private final JPanel playerListPanel;
 
     private final Timer refreshTimer;
+    private boolean updatingMapCombo = false;
 
     // ── Màu sắc chuẩn Bomb It theme ───────────────────────────
     private static final Color BG_TOP       = new Color(0x0d1b2a);
@@ -70,11 +74,11 @@ public class RoomPanel extends JPanel {
             }
         };
         card.setOpaque(false);
-        card.setLayout(new BorderLayout(0, 20));
-        card.setBorder(new EmptyBorder(30, 36, 30, 36));
-        card.setPreferredSize(new Dimension(540, 520));
+        card.setLayout(new BorderLayout(0, 16));
+        card.setBorder(new EmptyBorder(24, 36, 24, 36));
+        card.setPreferredSize(new Dimension(560, 560));
 
-        // ── TOP: Tiêu đề + Mã phòng ───────────────────────────
+        // ── TOP: Tiêu đề + Mã phòng + Chọn Bản Đồ ──────────────
         JPanel topPanel = new JPanel();
         topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
         topPanel.setOpaque(false);
@@ -84,7 +88,7 @@ public class RoomPanel extends JPanel {
         header.setFont(new Font("Segoe UI", Font.BOLD, 14));
         header.setForeground(TEXT_SEC);
 
-        JPanel codeRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 6));
+        JPanel codeRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 4));
         codeRow.setOpaque(false);
 
         JLabel codePrefix = new JLabel("MÃ PHÒNG:");
@@ -92,7 +96,7 @@ public class RoomPanel extends JPanel {
         codePrefix.setForeground(TEXT_PRI);
 
         roomCodeLabel = new JLabel("----");
-        roomCodeLabel.setFont(new Font("Segoe UI", Font.BOLD, 34));
+        roomCodeLabel.setFont(new Font("Segoe UI", Font.BOLD, 32));
         roomCodeLabel.setForeground(ACCENT_GOLD);
 
         copyCodeBtn = createSmallButton("📋 Sao chép", new Color(0x27, 0x3b, 0x54));
@@ -107,10 +111,40 @@ public class RoomPanel extends JPanel {
         hostBadgeLabel.setFont(new Font("Segoe UI", Font.BOLD, 12));
         hostBadgeLabel.setForeground(ACCENT_GOLD);
 
+        // Hàng chọn bản đồ (Host chọn hoặc hiển thị cho thành viên)
+        JPanel mapRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 4));
+        mapRow.setOpaque(false);
+        JLabel mapLbl = new JLabel("🗺 Bản Đồ:");
+        mapLbl.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        mapLbl.setForeground(TEXT_SEC);
+
+        mapSelector = new JComboBox<>(new String[] {
+            "🎲 Ngẫu Nhiên (Random)",
+            "🏰 Cổ Điển (Classic)",
+            "⚔ Mở Rộng (Open Battle)",
+            "🌀 Mê Cung (Labyrinth)",
+            "⚡ Giao Tranh (Crossfire)"
+        });
+        mapSelector.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        mapSelector.setBackground(SLOT_BG);
+        mapSelector.setForeground(Color.WHITE);
+        mapSelector.setFocusable(false);
+        mapSelector.setPreferredSize(new Dimension(200, 28));
+        mapSelector.addActionListener(e -> {
+            if (!updatingMapCombo && this.state.imHost && callback != null) {
+                callback.onSelectMap(mapSelector.getSelectedIndex());
+            }
+        });
+
+        mapRow.add(mapLbl);
+        mapRow.add(mapSelector);
+
         topPanel.add(header);
-        topPanel.add(Box.createVerticalStrut(4));
+        topPanel.add(Box.createVerticalStrut(2));
         topPanel.add(codeRow);
         topPanel.add(hostBadgeLabel);
+        topPanel.add(Box.createVerticalStrut(4));
+        topPanel.add(mapRow);
 
         card.add(topPanel, BorderLayout.NORTH);
 
@@ -174,31 +208,58 @@ public class RoomPanel extends JPanel {
         boolean isHost = state.imHost;
         hostBadgeLabel.setVisible(isHost);
 
+        // Cập nhật bộ chọn bản đồ
+        updatingMapCombo = true;
+        int mType = state.selectedMapType;
+        if (mType >= 0 && mType < mapSelector.getItemCount() && mapSelector.getSelectedIndex() != mType) {
+            mapSelector.setSelectedIndex(mType);
+        }
+        mapSelector.setEnabled(isHost);
+        mapSelector.setToolTipText(isHost ? "Chọn bản đồ cho trận đấu" : "Chỉ Chủ phòng mới có quyền chọn bản đồ");
+        updatingMapCombo = false;
+
         // Cập nhật danh sách người chơi
-        List<String> names = state.roomPlayerNames;
         playerListPanel.removeAll();
+        List<ClientGameState.RoomSlot> slots = state.roomSlots;
+        int count = slots.size();
 
-        int count = names.size();
-        for (int i = 0; i < GameConstants.MAX_PLAYERS; i++) {
-            if (i < count) {
-                String rawName = names.get(i);
-                boolean slotIsHost = rawName.contains("[HOST]") || (i == 0 && isHost);
-                String displayName = rawName.replace("[HOST]", "").trim();
-                boolean isMe = (state.myPlayerId > 0 && displayName.equals(state.myPlayerName)) ||
-                               (count == 1 && isHost);
-
-                playerListPanel.add(buildPlayerSlot(i + 1, displayName, slotIsHost, isMe, true));
-            } else {
-                playerListPanel.add(buildPlayerSlot(i + 1, "Đang chờ người chơi...", false, false, false));
+        if (count > 0) {
+            for (int i = 0; i < GameConstants.MAX_PLAYERS; i++) {
+                if (i < count) {
+                    ClientGameState.RoomSlot s = slots.get(i);
+                    boolean isMe = (state.myPlayerId > 0 && s.id == state.myPlayerId) ||
+                                   (count == 1 && isHost);
+                    playerListPanel.add(buildPlayerSlot(i + 1, s.id, s.name, s.isHost, isMe, true));
+                } else {
+                    playerListPanel.add(buildPlayerSlot(i + 1, -1, "Đang chờ người chơi...", false, false, false));
+                }
+            }
+        } else {
+            // Fallback nếu chưa nhận được RoomSlot
+            List<String> names = state.roomPlayerNames;
+            int n = names.size();
+            for (int i = 0; i < GameConstants.MAX_PLAYERS; i++) {
+                if (i < n) {
+                    String rawName = names.get(i);
+                    boolean slotIsHost = rawName.contains("[HOST]") || (i == 0 && isHost);
+                    String displayName = rawName.replace("[HOST]", "").trim();
+                    boolean isMe = (state.myPlayerId > 0 && displayName.equals(state.myPlayerName)) ||
+                                   (n == 1 && isHost);
+                    playerListPanel.add(buildPlayerSlot(i + 1, -1, displayName, slotIsHost, isMe, true));
+                } else {
+                    playerListPanel.add(buildPlayerSlot(i + 1, -1, "Đang chờ người chơi...", false, false, false));
+                }
             }
         }
+
+        int currentPlayers = Math.max(count, state.roomPlayerNames.size());
 
         // Cập nhật nút Start
         if (isHost) {
             startBtn.setVisible(true);
-            if (count >= GameConstants.MIN_PLAYERS_TO_START) {
+            if (currentPlayers >= GameConstants.MIN_PLAYERS_TO_START) {
                 startBtn.setEnabled(true);
-                startBtn.setText("▶ BẮT ĐẦU NGAY (" + count + "/" + GameConstants.MAX_PLAYERS + ")");
+                startBtn.setText("▶ BẮT ĐẦU NGAY (" + currentPlayers + "/" + GameConstants.MAX_PLAYERS + ")");
                 statusLabel.setText("✅ Đã đủ điều kiện! Bấm Bắt Đầu để vào trận.");
                 statusLabel.setForeground(ACCENT_GREEN);
             } else {
@@ -209,7 +270,7 @@ public class RoomPanel extends JPanel {
             }
         } else {
             startBtn.setVisible(false);
-            statusLabel.setText("⏳ Đang chờ Chủ phòng bắt đầu trận đấu...");
+            statusLabel.setText("⏳ Đang chờ Chủ phòng (" + state.currentMapName + ") bắt đầu trận đấu...");
             statusLabel.setForeground(ACCENT_GOLD);
         }
 
@@ -217,7 +278,7 @@ public class RoomPanel extends JPanel {
         playerListPanel.repaint();
     }
 
-    private JPanel buildPlayerSlot(int slotNum, String name, boolean isHost, boolean isMe, boolean occupied) {
+    private JPanel buildPlayerSlot(int slotNum, int playerId, String name, boolean isHost, boolean isMe, boolean occupied) {
         JPanel slot = new JPanel(new BorderLayout(12, 0)) {
             @Override protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g.create();
@@ -255,7 +316,7 @@ public class RoomPanel extends JPanel {
         left.add(nameLbl);
         slot.add(left, BorderLayout.WEST);
 
-        // Bên phải: Huy hiệu Host / YOU / Ready
+        // Bên phải: Huy hiệu Host / YOU / Ready / Nút Kick
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 4));
         right.setOpaque(false);
 
@@ -271,11 +332,27 @@ public class RoomPanel extends JPanel {
             meBadge.setForeground(ACCENT_ORANGE);
             right.add(meBadge);
         }
-        if (occupied) {
+        if (occupied && !isHost) {
             JLabel readyLbl = new JLabel("✔ SẴN SÀNG");
             readyLbl.setFont(new Font("Segoe UI", Font.PLAIN, 11));
             readyLbl.setForeground(ACCENT_GREEN);
             right.add(readyLbl);
+        }
+
+        // Quyền Kick cho Chủ Phòng (không kick chính mình)
+        if (occupied && !isMe && state.imHost && playerId > 0) {
+            JButton kickBtn = createSmallButton("❌ Kick", new Color(0xC0, 0x39, 0x2B));
+            kickBtn.setPreferredSize(new Dimension(65, 26));
+            kickBtn.setToolTipText("Kick " + name + " khỏi phòng");
+            kickBtn.addActionListener(e -> {
+                int opt = JOptionPane.showConfirmDialog(this,
+                        "Bạn có chắc muốn kick người chơi [" + name + "] khỏi phòng?",
+                        "Xác nhận Kick", JOptionPane.YES_NO_OPTION);
+                if (opt == JOptionPane.YES_OPTION && callback != null) {
+                    callback.onKickPlayer(playerId);
+                }
+            });
+            right.add(kickBtn);
         }
 
         slot.add(right, BorderLayout.EAST);

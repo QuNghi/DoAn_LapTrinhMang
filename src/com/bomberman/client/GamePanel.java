@@ -100,19 +100,18 @@ public class GamePanel extends JPanel implements KeyListener {
         renderTimer.start();
         requestFocusInWindow();
 
-        // Mouse listener cho các nút click trên overlay game over (vote restart)
+        // Mouse listener cho các nút click trên overlay game over (Thoát phòng / Chơi tiếp)
         addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (!state.gameOver) return;
                 for (long[] area : restartClickAreas) {
                     int ax = (int)area[0], ay = (int)area[1], aw = (int)area[2], ah = (int)area[3], type = (int)area[4];
                     if (e.getX() >= ax && e.getX() <= ax+aw && e.getY() >= ay && e.getY() <= ay+ah) {
-                        if (type == 1 && !restartVoteYesSent) {
-                            restartVoteYesSent = true;
-                            if (client != null) client.sendRestartVote(true);
-                        } else if (type == 2 && !restartVoteNoSent) {
-                            restartVoteNoSent = true;
-                            if (client != null) client.sendRestartVote(false);
+                        if (type == 1) { // Chơi tiếp -> quay về phòng chờ
+                            if (client != null) client.sendPlayAgain();
+                        } else if (type == 2) { // Thoát phòng -> ra sảnh chính
+                            if (client != null) client.sendLeaveRoom();
                             app.showLobby();
                         }
                     }
@@ -333,7 +332,7 @@ public class GamePanel extends JPanel implements KeyListener {
         if (!pd.alive) {
             g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
             g2.setColor(new Color(0xFF, 0x44, 0x44));
-            g2.drawString("☠️ KO", x + w - 42, y + 24);
+            g2.drawString("☠️ BỊ LOẠI", x + w - 66, y + 24);
         } else if (pd.hasShield) {
             g2.setFont(new Font("Segoe UI", Font.BOLD, 11));
             g2.setColor(new Color(0xFF, 0xD7, 0x00));
@@ -656,20 +655,8 @@ public class GamePanel extends JPanel implements KeyListener {
             Color pc = getPlayerColor(pd.id);
             Color pcDark = getPlayerDark(pd.id);
 
+            // Khi người chơi bị tiêu diệt: không để lại bóng mờ trong sân đấu
             if (!pd.alive) {
-                // Vẽ nhân vật chết (mờ, x)
-                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f));
-                drawCharacter(g2, px, py, pc, pcDark, pd, false);
-                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
-
-                // Vẽ X đỏ
-                int mx = px + TILE_SIZE / 2;
-                int my = py + TILE_SIZE / 2;
-                g2.setColor(new Color(0xFF3333));
-                g2.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                int r = 12;
-                g2.drawLine(mx - r, my - r, mx + r, my + r);
-                g2.drawLine(mx + r, my - r, mx - r, my + r);
                 continue;
             }
 
@@ -688,13 +675,25 @@ public class GamePanel extends JPanel implements KeyListener {
                 g2.drawOval(px + sox - 2, py + soy - 2, sr * 2 + 4, sr * 2 + 4);
             }
 
-            // Marker "YOU" cho player của mình
+            // Hiện rõ tên người chơi đã nhập trên đầu nhân vật
+            String pName = (pd.name != null && !pd.name.isEmpty()) ? pd.name : ("P" + pd.id);
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
+            FontMetrics fm = g2.getFontMetrics();
+            int nameW = fm.stringWidth(pName);
+            int nameX = px + (TILE_SIZE - nameW) / 2;
+            int nameY = py - 4;
+
+            // Background pill mờ
+            g2.setColor(new Color(0, 0, 0, 160));
+            g2.fillRoundRect(nameX - 4, nameY - 10, nameW + 8, 13, 6, 6);
             if (pd.id == state.myPlayerId) {
-                g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
                 g2.setColor(ACCENT_YELLOW);
-                String you = "YOU";
-                FontMetrics fm = g2.getFontMetrics();
-                g2.drawString(you, px + (TILE_SIZE - fm.stringWidth(you)) / 2, py - 2);
+                g2.setStroke(new BasicStroke(1.2f));
+                g2.drawRoundRect(nameX - 4, nameY - 10, nameW + 8, 13, 6, 6);
+                g2.drawString(pName, nameX, nameY);
+            } else {
+                g2.setColor(Color.WHITE);
+                g2.drawString(pName, nameX, nameY);
             }
         }
     }
@@ -876,7 +875,7 @@ public class GamePanel extends JPanel implements KeyListener {
         int cx = w / 2;
         int cy = h / 2;
 
-        int cw = 440, ch = 340;
+        int cw = 460, ch = 360;
         int crx = cx - cw / 2, cry = cy - ch / 2;
 
         // Card nền kết quả
@@ -891,12 +890,12 @@ public class GamePanel extends JPanel implements KeyListener {
         g2.setColor(new Color(0xFF, 0xD7, 0x00));
         String title = "🏆 CHIẾN THẮNG TRẬN ĐẤU! 🏆";
         FontMetrics fm = g2.getFontMetrics();
-        g2.drawString(title, cx - fm.stringWidth(title) / 2, cry + 40);
+        g2.drawString(title, cx - fm.stringWidth(title) / 2, cry + 38);
 
         // 1. Hình ảnh nhân vật chiến thắng (phóng to)
-        int avSz = 56;
+        int avSz = 52;
         int avX = cx - avSz / 2;
-        int avY = cry + 58;
+        int avY = cry + 50;
         int winId = state.winnerPlayerId > 0 ? state.winnerPlayerId : 1;
         Color winColor = getPlayerColor(winId);
         Color winDark = getPlayerDark(winId);
@@ -909,32 +908,32 @@ public class GamePanel extends JPanel implements KeyListener {
 
         // Mắt nhân vật
         g2.setColor(Color.WHITE);
-        g2.fillOval(avX + 13, avY + 18, 9, 9);
-        g2.fillOval(avX + 34, avY + 18, 9, 9);
+        g2.fillOval(avX + 11, avY + 16, 8, 8);
+        g2.fillOval(avX + 33, avY + 16, 8, 8);
         g2.setColor(Color.BLACK);
-        g2.fillOval(avX + 16, avY + 22, 4, 4);
-        g2.fillOval(avX + 37, avY + 22, 4, 4);
+        g2.fillOval(avX + 14, avY + 19, 4, 4);
+        g2.fillOval(avX + 36, avY + 19, 4, 4);
 
         // Vương miện
-        g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 24));
-        g2.drawString("👑", avX + 14, avY - 4);
+        g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 22));
+        g2.drawString("👑", avX + 13, avY - 2);
 
         // 2. Tên người thắng cuộc
-        g2.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        g2.setFont(new Font("Segoe UI", Font.BOLD, 17));
         g2.setColor(Color.WHITE);
         String wName = (state.winnerName.isEmpty() ? "Player " + winId : state.winnerName);
         fm = g2.getFontMetrics();
-        g2.drawString(wName, cx - fm.stringWidth(wName) / 2, cry + 138);
+        g2.drawString(wName, cx - fm.stringWidth(wName) / 2, cry + 125);
 
         // 3. Thông tin về các vật phẩm nhặt được
-        g2.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        g2.setFont(new Font("Segoe UI", Font.BOLD, 12));
         g2.setColor(new Color(0x90, 0xA4, 0xAE));
         String subItems = "— VẬT PHẨM ĐÃ NHẶT TRONG TRẬN —";
         fm = g2.getFontMetrics();
-        g2.drawString(subItems, cx - fm.stringWidth(subItems) / 2, cry + 168);
+        g2.drawString(subItems, cx - fm.stringWidth(subItems) / 2, cry + 150);
 
-        int itemBoxY = cry + 182;
-        int itemW = 74, itemH = 68;
+        int itemBoxY = cry + 162;
+        int itemW = 74, itemH = 64;
         int itemGap = 6;
         int startItemX = cx - (itemW * 5 + itemGap * 4) / 2;
 
@@ -944,47 +943,43 @@ public class GamePanel extends JPanel implements KeyListener {
         drawWinnerItemBox(g2, startItemX + (itemW + itemGap) * 3, itemBoxY, itemW, itemH, "🛡️", "Khiên", state.winnerShield);
         drawWinnerItemBox(g2, startItemX + (itemW + itemGap) * 4, itemBoxY, itemW, itemH, "🔫", "Súng", state.winnerGun);
 
-        // Nút vote restart (chỉ hiện khi server đã gửi RESTART_VOTE_REQ)
+        // Hai nút hành động khi kết thúc trận: THOÁT PHÒNG và CHƠI TIẾP
         restartClickAreas.clear();
-        if (state.restartVoting) {
-            int btnY = cry + ch - 80;
-            int btnW = 160, btnH = 42;
-            int btn1X = cx - btnW - 10;
-            int btn2X = cx + 10;
+        int btnY = cry + ch - 76;
+        int btnW = 160, btnH = 40;
+        int btn1X = cx - btnW - 10;
+        int btn2X = cx + 10;
 
-            // Nút Chơi lại (YES)
-            Color yesCol = restartVoteYesSent ? new Color(0x3a3a3a) : new Color(0x2ecc71);
-            g2.setColor(yesCol);
-            g2.fillRoundRect(btn1X, btnY, btnW, btnH, 12, 12);
-            g2.setColor(Color.WHITE);
-            g2.setFont(new Font("Segoe UI", Font.BOLD, 14));
-            String yesLabel = restartVoteYesSent ? "✔ Đã vote" : "🔄 CHƠI LẠI";
-            FontMetrics fmy = g2.getFontMetrics();
-            g2.drawString(yesLabel, btn1X + (btnW - fmy.stringWidth(yesLabel)) / 2, btnY + btnH / 2 + 5);
-            restartClickAreas.add(new long[]{btn1X, btnY, btnW, btnH, 1});
+        // Nút Thoát Phòng (type 2)
+        g2.setColor(new Color(0xe7, 0x4c, 0x3c));
+        g2.fillRoundRect(btn1X, btnY, btnW, btnH, 10, 10);
+        g2.setColor(new Color(0xc0, 0x39, 0x2b));
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.drawRoundRect(btn1X, btnY, btnW, btnH, 10, 10);
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        String noLabel = "🚪 THOÁT PHÒNG";
+        FontMetrics fmn = g2.getFontMetrics();
+        g2.drawString(noLabel, btn1X + (btnW - fmn.stringWidth(noLabel)) / 2, btnY + btnH / 2 + 5);
+        restartClickAreas.add(new long[]{btn1X, btnY, btnW, btnH, 2});
 
-            // Nút Về sảnh (NO)
-            Color noCol = restartVoteNoSent ? new Color(0x3a3a3a) : new Color(0xe74c3c);
-            g2.setColor(noCol);
-            g2.fillRoundRect(btn2X, btnY, btnW, btnH, 12, 12);
-            g2.setColor(Color.WHITE);
-            String noLabel = restartVoteNoSent ? "✔ Đã vote" : "🚪 VỀ SẢNH";
-            FontMetrics fmn = g2.getFontMetrics();
-            g2.drawString(noLabel, btn2X + (btnW - fmn.stringWidth(noLabel)) / 2, btnY + btnH / 2 + 5);
-            restartClickAreas.add(new long[]{btn2X, btnY, btnW, btnH, 2});
+        // Nút Chơi Tiếp (type 1)
+        g2.setColor(new Color(0x27, 0xae, 0x60));
+        g2.fillRoundRect(btn2X, btnY, btnW, btnH, 10, 10);
+        g2.setColor(new Color(0x21, 0x96, 0x53));
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.drawRoundRect(btn2X, btnY, btnW, btnH, 10, 10);
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        String yesLabel = "🔄 CHƠI TIẾP";
+        FontMetrics fmy = g2.getFontMetrics();
+        g2.drawString(yesLabel, btn2X + (btnW - fmy.stringWidth(yesLabel)) / 2, btnY + btnH / 2 + 5);
+        restartClickAreas.add(new long[]{btn2X, btnY, btnW, btnH, 1});
 
-            // Tiến độ vote
-            g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-            g2.setColor(new Color(0x90, 0xA4, 0xAE));
-            String voteInfo = state.restartVotesYes + "/" + state.restartVotesTotal + " người đồng ý chơi lại";
-            FontMetrics fmv = g2.getFontMetrics();
-            g2.drawString(voteInfo, cx - fmv.stringWidth(voteInfo) / 2, btnY + btnH + 16);
-        }
-
-        // Hướng dẫn ESC
-        g2.setFont(new Font("Segoe UI", Font.ITALIC, 12));
+        // Hướng dẫn
+        g2.setFont(new Font("Segoe UI", Font.ITALIC, 11));
         g2.setColor(new Color(0x78, 0x90, 0x9C));
-        String hint = "[ Nhấn phím ESC để quay về Sảnh ]";
+        String hint = "[ Chọn 'Chơi tiếp' để quay về phòng chờ hoặc 'Thoát phòng' để ra sảnh ]";
         fm = g2.getFontMetrics();
         g2.drawString(hint, cx - fm.stringWidth(hint) / 2, cry + ch - 16);
     }
@@ -1030,21 +1025,34 @@ public class GamePanel extends JPanel implements KeyListener {
             float curX = bd.getCurrentX();
             float curY = bd.getCurrentY();
 
-            // Vẽ motion blur trail (5 chấm nhỏ dần về phía sau)
-            float dx = bd.toX - bd.fromX;
-            float dy = bd.toY - bd.fromY;
-            float len = (float) Math.sqrt(dx * dx + dy * dy);
-            if (len == 0) continue;
-            float nx = dx / len;  // unit vector
-            float ny = dy / len;
+            float nx = 0, ny = 0;
+            if (bd.isRealtime) {
+                if ("RIGHT".equalsIgnoreCase(bd.direction)) nx = 1;
+                else if ("LEFT".equalsIgnoreCase(bd.direction)) nx = -1;
+                else if ("UP".equalsIgnoreCase(bd.direction)) ny = -1;
+                else if ("DOWN".equalsIgnoreCase(bd.direction)) ny = 1;
+            } else {
+                float dx = bd.toX - bd.fromX;
+                float dy = bd.toY - bd.fromY;
+                float len = (float) Math.sqrt(dx * dx + dy * dy);
+                if (len > 0) {
+                    nx = dx / len;
+                    ny = dy / len;
+                }
+            }
 
             int trailCount = 5;
             for (int t = 0; t < trailCount; t++) {
-                float trailProgress = progress - (t + 1) * 0.06f;
-                if (trailProgress < 0) continue;
-
-                float trailX = bd.fromX + (bd.toX - bd.fromX) * trailProgress;
-                float trailY = bd.fromY + (bd.toY - bd.fromY) * trailProgress;
+                float trailX, trailY;
+                if (bd.isRealtime) {
+                    trailX = curX - nx * (t + 1) * 0.12f;
+                    trailY = curY - ny * (t + 1) * 0.12f;
+                } else {
+                    float trailProgress = progress - (t + 1) * 0.06f;
+                    if (trailProgress < 0) continue;
+                    trailX = bd.fromX + (bd.toX - bd.fromX) * trailProgress;
+                    trailY = bd.fromY + (bd.toY - bd.fromY) * trailProgress;
+                }
 
                 int trailRadius = (int)(5 - t * 0.8f);
                 int alpha = (int)(200 - t * 35);

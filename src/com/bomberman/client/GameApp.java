@@ -94,6 +94,20 @@ public class GameApp extends JFrame {
                 }
                 showLobby();
             }
+
+            @Override
+            public void onKickPlayer(int playerId) {
+                if (client != null) {
+                    client.sendKickPlayer(playerId);
+                }
+            }
+
+            @Override
+            public void onSelectMap(int mapType) {
+                if (client != null) {
+                    client.sendSetMap(mapType);
+                }
+            }
         });
         rootPanel.add(roomPanel, SCREEN_ROOM);
 
@@ -157,6 +171,7 @@ public class GameApp extends JFrame {
             switch (header) {
                 case "ROOM_CREATED":
                 case "ROOM_JOINED":
+                case "RETURNED_TO_ROOM":
                     showRoomLobby();
                     break;
 
@@ -169,6 +184,11 @@ public class GameApp extends JFrame {
                     break;
 
                 case "QUIT_ACK":
+                    if (parts.length > 1 && "KICKED".equals(parts[1])) {
+                        JOptionPane.showMessageDialog(this, "Bạn đã bị chủ phòng kích khỏi phòng!", "Thông báo", JOptionPane.WARNING_MESSAGE);
+                    } else if (parts.length > 1 && "ROOM_CLOSED".equals(parts[1])) {
+                        JOptionPane.showMessageDialog(this, "Phòng đã bị quản trị viên máy chủ đóng!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
+                    }
                     showLobby();
                     break;
 

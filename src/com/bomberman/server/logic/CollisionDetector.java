@@ -29,8 +29,8 @@ public class CollisionDetector {
         double centerX = newX + 0.5;
         double centerY = newY + 0.5;
 
-        // Bán kính va chạm 0.27 (đã giảm 10% để dễ luồn lách qua các góc cua và khe gạch)
-        double halfSize = 0.27;
+        // Bán kính va chạm 0.235 (tối ưu để dễ luồn lách qua các góc cua và khe gạch)
+        double halfSize = 0.235;
 
         double minX = centerX - halfSize;
         double maxX = centerX + halfSize;

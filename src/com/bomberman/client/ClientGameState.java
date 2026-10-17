@@ -40,6 +40,21 @@ public class ClientGameState {
     public volatile String myRoomCode = "";
     public volatile boolean imHost = false;
     public final List<String> roomPlayerNames = new CopyOnWriteArrayList<>();
+    public final List<RoomSlot> roomSlots = new CopyOnWriteArrayList<>();
+    public volatile int selectedMapType = 0;
+    public volatile String currentMapName = "Cổ điển (Classic)";
+
+    public static class RoomSlot {
+        public int id;
+        public String name;
+        public boolean isHost;
+
+        public RoomSlot(int id, String name, boolean isHost) {
+            this.id = id;
+            this.name = name;
+            this.isHost = isHost;
+        }
+    }
 
     // ───── Sequence number (lọc out-of-order packet) ─────
     public volatile long lastReceivedSeq = -1;
@@ -133,13 +148,18 @@ public class ClientGameState {
 
     /**
      * Biểu diễn viên đạn đang bay trên client (animation interpolation).
-     * Server gửi BULLET_START|shooterId|fromX|fromY|toX|toY
+     * Hỗ trợ cả BULLET_SPAWN thời gian thực và BULLET_START.
      */
     public static class BulletData {
+        public String id = "";
         public int shooterId;
         public float fromX, fromY;   // tọa độ xuất phát (tile grid - float)
-        public float toX, toY;       // tọa độ kết thúc
+        public float toX, toY;       // tọa độ kết thúc (nếu có)
+        public String direction = "RIGHT";
+        public float speed = 0.40f;  // ô / tick
         public long startTimeMs;
+        public boolean isRealtime = false;
+        public boolean hit = false;
         public static final long DURATION_MS = 280; // 280ms bay hết
 
         public BulletData(int shooterId, float fromX, float fromY, float toX, float toY) {
@@ -147,21 +167,60 @@ public class ClientGameState {
             this.fromX = fromX; this.fromY = fromY;
             this.toX = toX; this.toY = toY;
             this.startTimeMs = System.currentTimeMillis();
+            this.isRealtime = false;
         }
 
-        /** Tiến độ bay 0.0 → 1.0 */
+        public BulletData(String id, int shooterId, float startX, float startY, String dir, float speed) {
+            this.id = id;
+            this.shooterId = shooterId;
+            this.fromX = startX; this.fromY = startY;
+            this.direction = dir;
+            this.speed = speed;
+            this.startTimeMs = System.currentTimeMillis();
+            this.isRealtime = true;
+        }
+
         public float getProgress() {
-            float p = (System.currentTimeMillis() - startTimeMs) / (float) DURATION_MS;
-            return Math.min(1f, p);
+            if (!isRealtime) {
+                float p = (System.currentTimeMillis() - startTimeMs) / (float) DURATION_MS;
+                return Math.min(1f, p);
+            }
+            // Realtime: đạn bay tối đa 12 ô
+            float elapsedSec = (System.currentTimeMillis() - startTimeMs) / 1000f;
+            float tilesTraveled = speed * 30f * elapsedSec;
+            return Math.min(1f, tilesTraveled / 12f);
         }
 
         public boolean isExpired() {
-            return getProgress() >= 1f;
+            if (hit) return true;
+            if (!isRealtime) return getProgress() >= 1f;
+            return (System.currentTimeMillis() - startTimeMs) > 2000;
         }
 
-        /** Vị trí hiện tại (grid float) interpolate tuyến tính */
-        public float getCurrentX() { return fromX + (toX - fromX) * getProgress(); }
-        public float getCurrentY() { return fromY + (toY - fromY) * getProgress(); }
+        /** Vị trí hiện tại (grid float) interpolate */
+        public float getCurrentX() {
+            if (!isRealtime) {
+                return fromX + (toX - fromX) * getProgress();
+            }
+            float elapsedSec = (System.currentTimeMillis() - startTimeMs) / 1000f;
+            float tilesPerSec = speed * 30f;
+            float dx = 0;
+            if ("RIGHT".equalsIgnoreCase(direction)) dx = 1;
+            else if ("LEFT".equalsIgnoreCase(direction)) dx = -1;
+            return fromX + dx * tilesPerSec * elapsedSec;
+        }
+
+        public float getCurrentY() {
+            if (!isRealtime) {
+                return fromY + (toY - fromY) * getProgress();
+            }
+            float elapsedSec = (System.currentTimeMillis() - startTimeMs) / 1000f;
+            float tilesPerSec = speed * 30f;
+            float dy = 0;
+            if ("DOWN".equalsIgnoreCase(direction)) dy = 1;
+            else if ("UP".equalsIgnoreCase(direction)) dy = -1;
+            return fromY + dy * tilesPerSec * elapsedSec;
+        }
     }
 
     // ──────────────────────────────────────────────────────────
@@ -473,16 +532,117 @@ public class ClientGameState {
     }
 
     /**
-     * Xử lý ROOM_PLAYERS|name1;name2;...
+     * Xử lý BULLET_SPAWN|bulletId|shooterId|startX|startY|dir|speed
+     */
+    public void parseBulletSpawn(String[] parts) {
+        if (parts.length < 7) return;
+        try {
+            String bid = parts[1];
+            int sid = Integer.parseInt(parts[2]);
+            float sx = Float.parseFloat(parts[3]);
+            float sy = Float.parseFloat(parts[4]);
+            String dir = parts[5];
+            float spd = Float.parseFloat(parts[6]);
+            bullets.add(new BulletData(bid, sid, sx, sy, dir, spd));
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Xử lý BULLET_HIT|bulletId|...
+     */
+    public void parseBulletHit(String[] parts) {
+        if (parts.length < 2) return;
+        String bid = parts[1];
+        for (BulletData bd : bullets) {
+            if (bd.id != null && bd.id.equals(bid)) {
+                bd.hit = true;
+            }
+        }
+    }
+
+    /**
+     * Xử lý PLAYER_INFO|id|name|isHost
+     */
+    public void parsePlayerInfo(String[] parts) {
+        if (parts.length < 3) return;
+        try {
+            int id = Integer.parseInt(parts[1]);
+            String name = parts[2];
+            setPlayerName(id, name);
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Xử lý MAP_CHANGED|mapId|mapName
+     */
+    public void parseMapChanged(String[] parts) {
+        if (parts.length < 2) return;
+        try {
+            selectedMapType = Integer.parseInt(parts[1]);
+            if (parts.length > 2) {
+                currentMapName = parts[2];
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Xử lý ROOM_PLAYERS|id:name:isHost;... hoặc name1 [HOST];...
      */
     public void parseRoomPlayers(String[] parts) {
         roomPlayerNames.clear();
+        roomSlots.clear();
         if (parts.length > 1 && !parts[1].trim().isEmpty()) {
-            for (String n : parts[1].split(";")) {
-                if (!n.trim().isEmpty()) {
-                    roomPlayerNames.add(n.trim());
+            for (String token : parts[1].split(";")) {
+                if (token.trim().isEmpty()) continue;
+                if (token.contains(":")) {
+                    String[] sub = token.split(":", -1);
+                    try {
+                        int id = Integer.parseInt(sub[0]);
+                        String name = sub.length > 1 ? sub[1] : ("Player" + id);
+                        boolean host = sub.length > 2 && "1".equals(sub[2]);
+                        roomSlots.add(new RoomSlot(id, name, host));
+                        roomPlayerNames.add(name + (host ? " [HOST]" : ""));
+                        setPlayerName(id, name);
+                    } catch (Exception e) {
+                        roomPlayerNames.add(token.trim());
+                    }
+                } else {
+                    roomPlayerNames.add(token.trim());
                 }
             }
+        }
+    }
+
+    /**
+     * Chuyển trạng thái khi quay về phòng chờ sau trận đấu.
+     */
+    public void returnToRoomWaiting() {
+        gameStarted = false;
+        gameOver = false;
+        showVictoryScreen = false;
+        victoryScreenStartMs = 0;
+        restartVoting = false;
+        restartVotesYes = 0;
+        restartVotesTotal = 0;
+        countdownSeconds = -1;
+        countdownText = "";
+        countdownStartTime = 0;
+        bombs.clear();
+        items.clear();
+        explosions.clear();
+        bullets.clear();
+        eliminationOrder.clear();
+        for (PlayerData pd : players.values()) {
+            pd.alive = true;
+            pd.kills = 0;
+            pd.score = 0;
+            pd.hasShield = false;
+            pd.weaponAmmo = 0;
+            pd.pickedBombRange = 0;
+            pd.pickedBombCount = 0;
+            pd.pickedSpeed = 0;
+            pd.pickedShield = 0;
+            pd.pickedWeapon = 0;
         }
     }
 
@@ -497,6 +657,7 @@ public class ClientGameState {
         eliminationOrder.clear();
         bullets.clear();
         roomPlayerNames.clear();
+        roomSlots.clear();
         myRoomCode = "";
         imHost = false;
         mapGrid = new int[GameConstants.MAP_HEIGHT][GameConstants.MAP_WIDTH];

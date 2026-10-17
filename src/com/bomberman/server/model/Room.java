@@ -12,11 +12,13 @@ import java.util.Collection;
  */
 public class Room {
     private final String roomCode;
+    private String roomName;
     private final GameEngine engine;
     private final long createdAt;
 
     public Room(String roomCode, UdpServer server) {
         this.roomCode = roomCode;
+        this.roomName = "Phòng " + roomCode;
         this.createdAt = System.currentTimeMillis();
         this.engine = new GameEngine(server, roomCode);
         try {
@@ -29,6 +31,34 @@ public class Room {
 
     public String getRoomCode() {
         return roomCode;
+    }
+
+    public String getRoomName() {
+        if (roomName != null && !roomName.trim().isEmpty() && !roomName.equals("Phòng " + roomCode)) {
+            return roomName;
+        }
+        String hostName = getHostName();
+        if (!hostName.isEmpty()) {
+            return "Phòng của " + hostName;
+        }
+        return "Phòng #" + roomCode;
+    }
+
+    public void setRoomName(String roomName) {
+        this.roomName = roomName;
+    }
+
+    public String getMapName() {
+        return engine.getMap().getCurrentMapName();
+    }
+
+    public String getHostName() {
+        for (PlayerSession ps : engine.getSessionsById().values()) {
+            if (ps.isHost()) {
+                return ps.getPlayer().getName();
+            }
+        }
+        return "";
     }
 
     public GameEngine getEngine() {

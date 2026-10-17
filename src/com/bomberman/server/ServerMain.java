@@ -53,12 +53,10 @@ public class ServerMain {
             }));
 
             System.out.println("Server đã sẵn sàng! Gõ lệnh hỗ trợ:");
-            System.out.println("  'rooms'                       -> Liệt kê danh sách tất cả các phòng");
-            System.out.println("  'room <code> start'           -> Bắt đầu trận đấu trong phòng chỉ định");
-            System.out.println("  'room <code> kick <playerId>' -> Đuổi người chơi khỏi phòng");
-            System.out.println("  'room <code> delete'          -> Xóa phòng chỉ định");
-            System.out.println("  'status'                      -> Xem tổng số người chơi đang kết nối");
-            System.out.println("  'stop' / 'exit'               -> Dừng Server và thoát");
+            System.out.println("  'rooms'              -> Liệt kê danh sách tất cả các phòng");
+            System.out.println("  'room <code> delete' -> Xóa phòng chỉ định (giải phóng phòng treo)");
+            System.out.println("  'status'             -> Xem tổng quan hệ thống & người chơi");
+            System.out.println("  'stop' / 'exit'      -> Dừng Server và thoát");
             System.out.println("----------------------------------------------------------");
 
             Scanner scanner = new Scanner(System.in);
@@ -75,16 +73,16 @@ public class ServerMain {
                 } else if (cmd.equals("rooms")) {
                     System.out.println("--- DANH SÁCH CÁC PHÒNG (" + roomManager.getAllRooms().size() + ") ---");
                     for (Room r : roomManager.getAllRooms()) {
-                        System.out.printf("  Phòng: [%-4s] | Trạng thái: %-9s | Người chơi: %d/%d | Host: P%d%n",
+                        System.out.printf("  Phòng: [%-4s] | Trạng thái: %-9s | Người chơi: %d/%d | Host: P%d | Map: %s%n",
                                 r.getRoomCode(), r.getStateName(), r.getPlayerCount(),
-                                GameConstants.MAX_PLAYERS, r.getHostPlayerId());
+                                GameConstants.MAX_PLAYERS, r.getHostPlayerId(), r.getMapName());
                     }
                 } else if (cmd.equals("status")) {
                     System.out.println("--- TỔNG QUAN HỆ THỐNG ---");
                     System.out.println("  Tổng số phòng: " + roomManager.getAllRooms().size());
                     System.out.println("  Tổng số người chơi: " + roomManager.getTotalPlayers());
                     for (Room r : roomManager.getAllRooms()) {
-                        System.out.println("  [Phòng " + r.getRoomCode() + " - " + r.getStateName() + "]:");
+                        System.out.println("  [Phòng " + r.getRoomCode() + " - " + r.getStateName() + " - " + r.getMapName() + "]:");
                         for (PlayerSession session : r.getSessions()) {
                             Player p = session.getPlayer();
                             System.out.printf("    Player ID: %d | Tên: %-10s | Host: %-5s | Sống: %-5s | Tọa độ: (%.2f, %.2f) | IP: %s:%d%n",
@@ -96,22 +94,13 @@ public class ServerMain {
                     String roomCode = tokens[1].toUpperCase();
                     String action = tokens[2].toLowerCase();
 
-                    if (action.equals("start")) {
-                        roomManager.forceStartRoom(roomCode);
-                        System.out.println("[CMD] Đã gửi lệnh bắt đầu cho phòng [" + roomCode + "].");
-                    } else if (action.equals("delete")) {
+                    if (action.equals("delete")) {
                         roomManager.deleteRoom(roomCode);
                         System.out.println("[CMD] Đã xóa phòng [" + roomCode + "].");
-                    } else if (action.equals("kick") && tokens.length >= 4) {
-                        try {
-                            int kickId = Integer.parseInt(tokens[3]);
-                            roomManager.kickPlayer(roomCode, kickId);
-                            System.out.println("[CMD] Đã kick Player " + kickId + " khỏi phòng [" + roomCode + "].");
-                        } catch (NumberFormatException e) {
-                            System.out.println("[ERROR] ID người chơi không hợp lệ.");
-                        }
+                    } else if (action.equals("start") || action.equals("kick")) {
+                        System.out.println("[INFO] Quyền bắt đầu trận đấu và kick người chơi đã được giao cho Client Chủ phòng quản lý.");
                     } else {
-                        System.out.println("[ERROR] Cú pháp lệnh room không đúng. Gõ 'rooms' để xem danh sách.");
+                        System.out.println("[ERROR] Cú pháp lệnh room không đúng. Sử dụng: 'room <code> delete'");
                     }
                 } else {
                     System.out.println("[WARN] Lệnh không nhận diện: " + line);

@@ -202,6 +202,29 @@ public class RoomManager {
                 break;
             }
 
+            case "KICK_PLAYER": {
+                String code = sessionToRoomCode.get(sessionKey);
+                if (code != null && parts.length > 1) {
+                    try {
+                        int targetId = Integer.parseInt(parts[1].trim());
+                        Room room = rooms.get(code);
+                        if (room != null) {
+                            boolean isHost = false;
+                            for (PlayerSession ps : room.getSessions()) {
+                                if (ps.getSessionKey().equals(sessionKey) && ps.isHost()) {
+                                    isHost = true;
+                                    break;
+                                }
+                            }
+                            if (isHost) {
+                                kickPlayer(code, targetId);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+                break;
+            }
+
             default: {
                 // Các gói tin trong trận: MOVE, ACTION, BOMB, USE_WEAPON, START_GAME, RESTART_VOTE, PING
                 String code = sessionToRoomCode.get(sessionKey);

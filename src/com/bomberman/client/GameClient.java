@@ -259,6 +259,24 @@ public class GameClient {
             case "BULLET_START":
                 state.parseBulletStart(parts);
                 break;
+            case "PLAYER_INFO":
+                state.parsePlayerInfo(parts);
+                break;
+            case "MAP_CHANGED":
+                state.parseMapChanged(parts);
+                break;
+            case "BULLET_SPAWN":
+                state.parseBulletSpawn(parts);
+                break;
+            case "BULLET_HIT":
+                state.parseBulletHit(parts);
+                break;
+            case "RETURNED_TO_ROOM":
+                state.returnToRoomWaiting();
+                break;
+            case "QUIT_ACK":
+                state.reset();
+                break;
             case "RESTART_VOTE_REQ":
                 state.restartVoting = true;
                 state.restartVotesYes = 0;
@@ -281,6 +299,24 @@ public class GameClient {
         if (onEvent != null) {
             onEvent.accept(header, parts);
         }
+    }
+
+    /** Gửi KICK_PLAYER|id (chỉ chủ phòng gửi) */
+    public void sendKickPlayer(int playerId) {
+        System.out.println("[CLIENT-ACTION] Kick player: " + playerId);
+        sendPacket("KICK_PLAYER|" + playerId);
+    }
+
+    /** Gửi SET_MAP|mapType (chỉ chủ phòng gửi) */
+    public void sendSetMap(int mapType) {
+        System.out.println("[CLIENT-ACTION] Đổi bản đồ: " + mapType);
+        sendPacket("SET_MAP|" + mapType);
+    }
+
+    /** Gửi PLAY_AGAIN khi hết trận */
+    public void sendPlayAgain() {
+        System.out.println("[CLIENT-ACTION] Chơi tiếp");
+        sendPacket("PLAY_AGAIN");
     }
 
     private void handleJoinAck(String[] parts) {
