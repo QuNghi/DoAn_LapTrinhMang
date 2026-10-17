@@ -208,7 +208,7 @@ public class GameApp extends JFrame {
                 case "RESTART_ACK":
                     if (parts.length > 1 && "ACCEPTED".equals(parts[1])) {
                         // Restart trận đấu
-                        state.reset();
+                        state.resetForNewMatch();
                         switchToGame();
                     } else if (parts.length > 1 && "REJECTED".equals(parts[1])) {
                         showLobby();

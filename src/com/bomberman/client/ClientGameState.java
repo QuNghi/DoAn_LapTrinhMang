@@ -247,6 +247,14 @@ public class ClientGameState {
                     }
                 }
             }
+            // Reset chuỗi Sequence Number và các đối tượng tạm thời khi nhận map mới
+            lastReceivedSeq = -1;
+            latestTick = 0;
+            bombs.clear();
+            items.clear();
+            explosions.clear();
+            bullets.clear();
+            resetPlayerPositionsToSpawn();
         } catch (Exception e) {
             System.err.println("[STATE] Lỗi parse MAP_INIT: " + e.getMessage());
         }
@@ -269,12 +277,19 @@ public class ClientGameState {
                 long seq = Long.parseLong(parts[1]);
                 // Lọc out-of-order packet: bỏ qua nếu seq cũ hơn hoặc bằng (xử lý modulo)
                 if (lastReceivedSeq >= 0) {
-                    long diff = (seq - lastReceivedSeq + GameConstants.SEQUENCE_NUMBER_MOD) % GameConstants.SEQUENCE_NUMBER_MOD;
-                    if (diff > GameConstants.SEQUENCE_NUMBER_MOD / 2 || diff == 0) {
-                        return; // Packet cũ hoặc trùng lặp, bỏ qua
+                    // Nếu server vừa reset sequence number về đầu (ván mới / restart game)
+                    if (seq < 100 && lastReceivedSeq > 500) {
+                        lastReceivedSeq = seq;
+                    } else {
+                        long diff = (seq - lastReceivedSeq + GameConstants.SEQUENCE_NUMBER_MOD) % GameConstants.SEQUENCE_NUMBER_MOD;
+                        if (diff > GameConstants.SEQUENCE_NUMBER_MOD / 2 || diff == 0) {
+                            return; // Packet cũ hoặc trùng lặp, bỏ qua
+                        }
+                        lastReceivedSeq = seq;
                     }
+                } else {
+                    lastReceivedSeq = seq;
                 }
-                lastReceivedSeq = seq;
                 latestTick = Long.parseLong(parts[3]);
                 pIndex = 4;
                 bIndex = 5;
@@ -646,6 +661,8 @@ public class ClientGameState {
         countdownSeconds = -1;
         countdownText = "";
         countdownStartTime = 0;
+        latestTick = 0;
+        lastReceivedSeq = -1;
         bombs.clear();
         items.clear();
         explosions.clear();
@@ -665,6 +682,7 @@ public class ClientGameState {
             players.clear();
         }
 
+        int idx = 0;
         for (PlayerData pd : players.values()) {
             pd.alive = true;
             pd.kills = 0;
@@ -676,6 +694,80 @@ public class ClientGameState {
             pd.pickedSpeed = 0;
             pd.pickedShield = 0;
             pd.pickedWeapon = 0;
+            pd.direction = "DOWN";
+
+            // Reset vị trí hiển thị về 4 góc spawn ban đầu
+            int spawnIdx = idx % 4;
+            pd.x = (spawnIdx == 1 || spawnIdx == 3) ? (GameConstants.MAP_WIDTH - 2.0) : 1.0;
+            pd.y = (spawnIdx == 2 || spawnIdx == 3) ? (GameConstants.MAP_HEIGHT - 2.0) : 1.0;
+            idx++;
+        }
+    }
+
+    /**
+     * Đưa tất cả người chơi trong phòng về 4 góc xuất phát ban đầu.
+     */
+    public void resetPlayerPositionsToSpawn() {
+        int idx = 0;
+        for (PlayerData pd : players.values()) {
+            int spawnIdx = idx % 4;
+            pd.x = (spawnIdx == 1 || spawnIdx == 3) ? (GameConstants.MAP_WIDTH - 2.0) : 1.0;
+            pd.y = (spawnIdx == 2 || spawnIdx == 3) ? (GameConstants.MAP_HEIGHT - 2.0) : 1.0;
+            pd.alive = true;
+            pd.direction = "DOWN";
+            idx++;
+        }
+    }
+
+    /**
+     * Reset các biến trận đấu khi chơi lại trực tiếp trong phòng mà không thoát ra lobby.
+     * Giữ nguyên mã phòng, danh sách người chơi, quyền Host và map hiện tại.
+     */
+    public void resetForNewMatch() {
+        gameStarted = false;
+        gameOver = false;
+        showVictoryScreen = false;
+        victoryScreenStartMs = 0;
+        restartVoting = false;
+        restartVotesYes = 0;
+        restartVotesTotal = 0;
+        countdownSeconds = -1;
+        countdownText = "";
+        countdownStartTime = 0;
+        latestTick = 0;
+        lastReceivedSeq = -1;
+        bombs.clear();
+        items.clear();
+        explosions.clear();
+        bullets.clear();
+        eliminationOrder.clear();
+
+        // Thu thập các ID hợp lệ từ roomSlots
+        Set<Integer> validIds = new HashSet<>();
+        for (RoomSlot slot : roomSlots) {
+            validIds.add(slot.id);
+        }
+        if (!validIds.isEmpty()) {
+            players.keySet().removeIf(id -> !validIds.contains(id));
+        }
+
+        int idx = 0;
+        for (PlayerData pd : players.values()) {
+            int spawnIdx = idx % 4;
+            pd.x = (spawnIdx == 1 || spawnIdx == 3) ? (GameConstants.MAP_WIDTH - 2.0) : 1.0;
+            pd.y = (spawnIdx == 2 || spawnIdx == 3) ? (GameConstants.MAP_HEIGHT - 2.0) : 1.0;
+            pd.alive = true;
+            pd.direction = "DOWN";
+            pd.kills = 0;
+            pd.score = 0;
+            pd.hasShield = false;
+            pd.weaponAmmo = 0;
+            pd.pickedBombRange = 0;
+            pd.pickedBombCount = 0;
+            pd.pickedSpeed = 0;
+            pd.pickedShield = 0;
+            pd.pickedWeapon = 0;
+            idx++;
         }
     }
 

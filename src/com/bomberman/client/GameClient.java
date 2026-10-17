@@ -218,6 +218,8 @@ public class GameClient {
                 state.connected = true;
                 state.countdownSeconds = -1;
                 state.countdownText = "";
+                state.lastReceivedSeq = -1;
+                state.latestTick = 0;
                 break;
             case "STATE":
                 state.parseState(parts);
@@ -247,6 +249,7 @@ public class GameClient {
                 break;
             case "COUNTDOWN":
                 state.parseCountdown(parts);
+                state.lastReceivedSeq = -1;
                 System.out.println("[CLIENT] Đếm ngược trận đấu: " + state.countdownText);
                 break;
             case "PLAYER_LEFT":

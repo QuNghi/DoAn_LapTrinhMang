@@ -265,26 +265,15 @@ public class GameEngine {
         bombs.clear();
         items.clear();
         bullets.clear();
-        map.regenerate(selectedMapType);
         // Reset vote
         for (PlayerSession ps : sessionsById.values()) {
             ps.setRestartVote(null);
         }
-        // Reset vị trí spawn người chơi
-        int idx = 0;
-        for (PlayerSession ps : sessionsById.values()) {
-            int spawnIdx = idx % spawnCoords.length;
-            ps.getPlayer().resetForNewGame(spawnCoords[spawnIdx][0], spawnCoords[spawnIdx][1]);
-            idx++;
-        }
-        // Gửi MAP_INIT mới cho tất cả
-        for (PlayerSession ps : sessionsById.values()) {
-            server.send(String.format("MAP_INIT|%d|%d|%s", map.getWidth(), map.getHeight(), map.toFlatString()),
-                    ps.getAddress(), ps.getPort());
-        }
-        // Bắt đầu AUTO nếu đủ người chơi
+        // Bắt đầu nếu đủ người chơi
         if (sessionsById.size() >= GameConstants.MIN_PLAYERS_TO_START) {
             startGame();
+        } else {
+            returnToRoomWaiting();
         }
     }
 
@@ -356,6 +345,8 @@ public class GameEngine {
         if (gameState != 0) return; // Chỉ bắt đầu khi đang ở WAITING
         gameState = 1; // COUNTDOWN
         gameOver = false;
+        currentTick = 0;
+        seqNumber = 0;
         System.out.println("[GAME-ENGINE] >>> BẮT ĐẦU ĐẾM NGƯỢC 3 GIÂY TRƯỚC TRẬN ĐẤU! <<<");
 
         // Dọn sạch bom, vật phẩm và đạn còn sót lại từ ván trước (nếu có)
@@ -382,11 +373,13 @@ public class GameEngine {
         for (PlayerSession s : sessionsById.values()) {
             server.send(String.format("MAP_INIT|%d|%d|%s", map.getWidth(), map.getHeight(), map.toFlatString()),
                     s.getAddress(), s.getPort());
+        }
+        for (PlayerSession s : sessionsById.values()) {
             server.broadcast(String.format("PLAYER_INFO|%d|%s|%d",
                     s.getPlayer().getId(), s.getPlayer().getName(), s.isHost() ? 1 : 0), sessionsById.values());
         }
 
-        // Gửi STATE đầu tiên để tất cả Client dịch chuyển ngay về 4 góc
+        // Gửi STATE đầu tiên (seq 0) để tất cả Client dịch chuyển ngay về 4 góc
         broadcastWorldState();
 
         // Broadcast đếm ngược ban đầu
@@ -526,7 +519,10 @@ public class GameEngine {
             }
 
             // 6. Broadcast gói tin WORLD STATE về cho toàn bộ client
-            broadcastWorldState();
+            // Chỉ gửi khi đang đếm ngược (COUNTDOWN = 1) hoặc đang thi đấu (PLAYING = 2)
+            if (gameState == 1 || gameState == 2) {
+                broadcastWorldState();
+            }
 
         } catch (Exception e) {
             System.err.println("[GAME-ENGINE] Lỗi trong Game Loop Tick: " + e.getMessage());
@@ -898,6 +894,8 @@ public class GameEngine {
                 System.out.println("[GAME-ENGINE] >>> TRẬN ĐẤU KẾT THÚC HÒA! KHÔNG CÒN AI SỐNG SÓT! <<<");
                 server.broadcast("GAME_OVER|0|NONE|0,0,0,0,0", sessionsById.values());
             }
+            // Đồng bộ trạng thái cuối trận ngay cho toàn bộ client
+            broadcastWorldState();
             // Gửi yêu cầu vote restart cho tất cả client
             server.broadcast(String.format("RESTART_VOTE_REQ|%d", winnerId), sessionsById.values());
         }
