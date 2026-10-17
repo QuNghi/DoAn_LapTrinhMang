@@ -5,7 +5,8 @@ package com.bomberman.common;
  * Được dùng chung giữa Server và Client để đồng bộ thông số kỹ thuật.
  */
 public final class GameConstants {
-    private GameConstants() {}
+    private GameConstants() {
+    }
 
     // Cổng mạng UDP
     public static final int DEFAULT_PORT = 9876;
@@ -37,8 +38,8 @@ public final class GameConstants {
     public static final long SEQUENCE_NUMBER_MOD = 65535; // Giới hạn sequence number STATE packet
 
     // Cấu hình vật phẩm bổ trợ (Items & Buffs)
-    public static final double ITEM_DROP_RATE = 0.45; // 45% xác suất rơi vật phẩm khi gạch mềm vỡ
-    public static final double ITEM_DROP_RATE_LATE_GAME = 0.60; // 60% xác suất rơi vật phẩm khi còn dưới 30% số ô gạch
+    public static final double ITEM_DROP_RATE = 0.70; // 70% xác suất rơi vật phẩm khi gạch mềm vỡ
+    public static final double ITEM_DROP_RATE_LATE_GAME = 0.90; // 90% xác suất rơi vật phẩm khi còn dưới 30% số ô gạch
     public static final double LATE_GAME_BRICK_THRESHOLD = 0.30; // Ngưỡng 30% số ô gạch có thể phá còn lại
     public static final double SPEED_BOOST_PERCENT = 0.10; // Tăng 10% tốc độ chạy
     public static final double MAX_PLAYER_SPEED = 0.24; // Giới hạn trần tốc độ để tránh xuyên tường
