@@ -34,8 +34,17 @@ public class GameMap {
      * - Các vị trí còn lại rải gạch mềm (SOFT_BRICK = 2)
      */
     public void initMap() {
-        Random random = new Random(12345); // Seed cố định để bản đồ cân bằng hoặc ngẫu nhiên
+        initMap(new Random(12345)); // Seed cố định mặc định
+    }
 
+    /**
+     * Tái tạo lại bản đồ ngẫu nhiên mới khi bắt đầu trận mới (Restart game).
+     */
+    public void regenerate() {
+        initMap(new Random());
+    }
+
+    public void initMap(Random random) {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 // Viền ngoài bản đồ
@@ -54,10 +63,6 @@ public class GameMap {
         }
 
         // Chừa khoảng trống cho 3-4 vị trí xuất phát (Góc trên-trái, trên-phải, dưới-trái, dưới-phải)
-        // Player 1: (1, 1), (1, 2), (2, 1)
-        // Player 2: (13, 1), (12, 1), (13, 2)
-        // Player 3: (1, 11), (1, 10), (2, 11)
-        // Player 4: (13, 11), (13, 10), (12, 11)
         boolean[][] safeSpawn = new boolean[height][width];
         markSafeZone(safeSpawn, 1, 1);
         markSafeZone(safeSpawn, width - 2, 1);

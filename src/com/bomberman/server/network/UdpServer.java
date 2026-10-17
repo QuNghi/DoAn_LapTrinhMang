@@ -20,13 +20,17 @@ public class UdpServer {
     }
 
     private final int port;
-    private final PacketListener listener;
+    private volatile PacketListener listener;
     private DatagramSocket socket;
     private Thread receiveThread;
     private volatile boolean running;
 
     public UdpServer(int port, PacketListener listener) {
         this.port = port;
+        this.listener = listener;
+    }
+
+    public void setListener(PacketListener listener) {
         this.listener = listener;
     }
 

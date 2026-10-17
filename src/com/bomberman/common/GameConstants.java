@@ -9,7 +9,7 @@ public final class GameConstants {
 
     // Cổng mạng UDP
     public static final int DEFAULT_PORT = 9876;
-    public static final int BUFFER_SIZE = 1024;
+    public static final int BUFFER_SIZE = 4096;
 
     // Kích thước bản đồ chuẩn (15 cột x 13 dòng)
     public static final int MAP_WIDTH = 15;
@@ -30,7 +30,11 @@ public final class GameConstants {
 
     // Giới hạn phòng chơi
     public static final int MAX_PLAYERS = 4;
+    public static final int MIN_PLAYERS_TO_START = 2; // Host có thể start với ít nhất 2 người
+    public static final int ROOM_CODE_LENGTH = 4; // Độ dài mã phòng ngẫu nhiên
     public static final long HEARTBEAT_TIMEOUT_MS = 8000; // 8 giây không có ping thì coi là ngắt kết nối
+    public static final long DISCONNECT_TIMEOUT_GAME_MS = 5000; // Rớt mạng 5s trong trận → tự thua
+    public static final long SEQUENCE_NUMBER_MOD = 65535; // Giới hạn sequence number STATE packet
 
     // Cấu hình vật phẩm bổ trợ (Items & Buffs)
     public static final double ITEM_DROP_RATE = 0.45; // 45% xác suất rơi vật phẩm khi gạch mềm vỡ

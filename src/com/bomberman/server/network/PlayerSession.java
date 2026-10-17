@@ -13,6 +13,9 @@ public class PlayerSession {
     private final InetAddress address;
     private final int port;
     private long lastHeartbeat;
+    private boolean isHost = false;
+    private String roomCode = "";
+    private Boolean restartVote = null; // null: chưa vote, true: YES, false: NO
 
     public PlayerSession(Player player, InetAddress address, int port) {
         this.player = player;
@@ -49,9 +52,33 @@ public class PlayerSession {
         return address.getHostAddress() + ":" + port;
     }
 
+    public boolean isHost() {
+        return isHost;
+    }
+
+    public void setHost(boolean host) {
+        this.isHost = host;
+    }
+
+    public String getRoomCode() {
+        return roomCode;
+    }
+
+    public void setRoomCode(String roomCode) {
+        this.roomCode = roomCode;
+    }
+
+    public Boolean getRestartVote() {
+        return restartVote;
+    }
+
+    public void setRestartVote(Boolean restartVote) {
+        this.restartVote = restartVote;
+    }
+
     @Override
     public String toString() {
-        return String.format("Session[PlayerID=%d, Name=%s, Address=%s:%d]",
-                player.getId(), player.getName(), address.getHostAddress(), port);
+        return String.format("Session[PlayerID=%d, Name=%s, Host=%s, Room=%s, Address=%s:%d]",
+                player.getId(), player.getName(), isHost, roomCode, address.getHostAddress(), port);
     }
 }

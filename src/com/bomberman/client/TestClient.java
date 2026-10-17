@@ -74,13 +74,25 @@ public class TestClient {
                     break;
                 case "b":
                 case "bomb":
-                case "space":
                     sendPacket("BOMB");
                     break;
                 case "f":
                 case "shoot":
                 case "use":
                     sendPacket("USE_WEAPON");
+                    break;
+                case "space":
+                case "action":
+                    sendPacket("ACTION");
+                    break;
+                case "start":
+                    sendPacket("START_GAME");
+                    break;
+                case "yes":
+                    sendPacket("RESTART_VOTE|YES");
+                    break;
+                case "no":
+                    sendPacket("RESTART_VOTE|NO");
                     break;
                 case "q":
                 case "quit":
@@ -90,7 +102,19 @@ public class TestClient {
                     System.out.println("[CLIENT] Đã thoát.");
                     return;
                 default:
-                    System.out.println("[CLIENT] Lệnh không hợp lệ. Gõ w/a/s/d di chuyển, b đặt bom, f bắn súng, q thoát.");
+                    if (input.startsWith("create ")) {
+                        String rName = input.substring(7).trim();
+                        sendPacket("CREATE_ROOM|" + rName);
+                    } else if (input.startsWith("join ")) {
+                        String[] p = input.substring(5).trim().split("\\s+");
+                        if (p.length >= 2) {
+                            sendPacket("JOIN_ROOM|" + p[0].toUpperCase() + "|" + p[1]);
+                        } else if (p.length == 1) {
+                            sendPacket("JOIN_ROOM|" + p[0].toUpperCase() + "|Player");
+                        }
+                    } else {
+                        System.out.println("[CLIENT] Lệnh không hợp lệ. Gõ w/a/s/d di chuyển, action (hoặc b/f), start, yes/no, q thoát.");
+                    }
             }
         }
     }

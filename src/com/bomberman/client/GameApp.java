@@ -8,7 +8,7 @@ import java.io.IOException;
 
 /**
  * Cửa sổ chính của ứng dụng Client (GameApp).
- * Quản lý chuyển màn hình giữa Lobby và Game.
+ * Quản lý chuyển đổi màn hình giữa: Sảnh chính (Lobby), Phòng chờ (Room Lobby), và Trận đấu (Game).
  */
 public class GameApp extends JFrame {
 
@@ -19,9 +19,11 @@ public class GameApp extends JFrame {
     private final JPanel rootPanel = new JPanel(cardLayout);
 
     private LobbyPanel lobbyPanel;
+    private RoomPanel roomPanel;
     private GamePanel gamePanel;
 
     private static final String SCREEN_LOBBY = "LOBBY";
+    private static final String SCREEN_ROOM  = "ROOM";
     private static final String SCREEN_GAME  = "GAME";
 
     public GameApp() {
@@ -46,7 +48,7 @@ public class GameApp extends JFrame {
                 getClass().getResource("/com/bomberman/client/res/icon.png"));
             setIconImage(icon.getImage());
         } catch (Exception ignored) {
-            // Không có file icon thì dùng default
+            // Không có file icon thì dùng mặc định
         }
 
         add(rootPanel);
@@ -57,61 +59,88 @@ public class GameApp extends JFrame {
     // ──────────────────────────────────────────────────────────
 
     private void buildScreens() {
-        // Lobby
-        lobbyPanel = new LobbyPanel(this::handleConnectRequest);
+        // 1. Lobby Panel
+        lobbyPanel = new LobbyPanel(new LobbyPanel.LobbyCallback() {
+            @Override
+            public void onQuickJoin(String name, String host, int port) {
+                connectAndSend(name, host, port, () -> client.sendPacket("JOIN|" + name));
+            }
+
+            @Override
+            public void onCreateRoom(String name, String host, int port) {
+                connectAndSend(name, host, port, () -> client.sendCreateRoom(name));
+            }
+
+            @Override
+            public void onJoinRoom(String roomCode, String name, String host, int port) {
+                connectAndSend(name, host, port, () -> client.sendJoinRoom(roomCode, name));
+            }
+        });
         rootPanel.add(lobbyPanel, SCREEN_LOBBY);
 
-        // Game panel (tạo tạm, sẽ build lại khi connect)
+        // 2. Room Panel (Phòng chờ)
+        roomPanel = new RoomPanel(state, new RoomPanel.RoomActionCallback() {
+            @Override
+            public void onStartGame() {
+                if (client != null) {
+                    client.sendStartGame();
+                }
+            }
+
+            @Override
+            public void onLeaveRoom() {
+                if (client != null) {
+                    client.sendLeaveRoom();
+                }
+                showLobby();
+            }
+        });
+        rootPanel.add(roomPanel, SCREEN_ROOM);
+
+        // 3. Game panel
         gamePanel = new GamePanel(state, null, this);
         rootPanel.add(gamePanel, SCREEN_GAME);
     }
 
     // ──────────────────────────────────────────────────────────
-    //  Xử lý khi người dùng nhấn Kết Nối
+    //  Kết nối Server
     // ──────────────────────────────────────────────────────────
 
-    private void handleConnectRequest(String playerName, String host, int port) {
-        // Nếu có client cũ, ngắt trước
+    private void connectAndSend(String playerName, String host, int port, Runnable afterConnected) {
         if (client != null) {
             client.disconnect();
         }
 
-        // Reset state - không set tên trước, chờ JOIN_ACK để biết ID thật
         state.reset();
-
-        // Tạo client mới
         client = new GameClient(host, port, state, this::handleServerEvent);
 
-        // Kết nối trong background thread
         new Thread(() -> {
             try {
                 client.connect(playerName);
 
-                // Chờ JOIN_ACK (max 5 giây)
+                // Chờ phản hồi JOIN_ACK (tối đa 5 giây)
                 long timeout = System.currentTimeMillis() + 5000;
                 while (!state.connected && System.currentTimeMillis() < timeout) {
                     Thread.sleep(50);
                 }
 
                 if (state.connected) {
-                    // Chuyển sang màn hình game trên EDT
-                    // (Tên người chơi đã được GameClient gán sau JOIN_ACK)
+                    afterConnected.run();
                     SwingUtilities.invokeLater(() -> {
-                        switchToGame();
+                        showRoomLobby();
                         lobbyPanel.showStatus("✅ Đã kết nối!", new Color(0x4CAF50));
                     });
                 } else {
-                    // Timeout
                     SwingUtilities.invokeLater(() -> {
                         lobbyPanel.showStatus("❌ Không thể kết nối! Kiểm tra IP/Port.", new Color(0xFF4444));
-                        lobbyPanel.setConnectEnabled(true);
+                        lobbyPanel.setButtonsEnabled(true);
                         client.disconnect();
                     });
                 }
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> {
-                    lobbyPanel.showStatus("❌ Lỗi: " + e.getMessage(), new Color(0xFF4444));
-                    lobbyPanel.setConnectEnabled(true);
+                    lobbyPanel.showStatus("❌ Lỗi mạng: " + e.getMessage(), new Color(0xFF4444));
+                    lobbyPanel.setButtonsEnabled(true);
                 });
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -120,31 +149,71 @@ public class GameApp extends JFrame {
     }
 
     // ──────────────────────────────────────────────────────────
-    //  Callback từ GameClient (sự kiện Server)
+    //  Callback xử lý sự kiện Server
     // ──────────────────────────────────────────────────────────
 
     private void handleServerEvent(String header, String[] parts) {
-        switch (header) {
-            case "GAME_OVER":
-                // Không cần xử lý thêm – GamePanel tự vẽ overlay
-                break;
-            case "FULL":
-                SwingUtilities.invokeLater(() -> {
+        SwingUtilities.invokeLater(() -> {
+            switch (header) {
+                case "ROOM_CREATED":
+                case "ROOM_JOINED":
+                    showRoomLobby();
+                    break;
+
+                case "COUNTDOWN":
+                case "GAME_START":
+                    // Chuyển ngay sang màn hình Game khi bắt đầu đếm ngược hoặc trận đấu
+                    if (gamePanel == null || !gamePanel.isFocusOwner()) {
+                        switchToGame();
+                    }
+                    break;
+
+                case "QUIT_ACK":
                     showLobby();
-                    lobbyPanel.showStatus("⛔ Phòng đã đủ người! Hãy thử lại.", new Color(0xFF6B35));
-                });
-                break;
-            default:
-                break;
-        }
+                    break;
+
+                case "ERROR":
+                    String err = parts.length > 1 ? parts[1] : "Có lỗi xảy ra!";
+                    lobbyPanel.showStatus("⚠ " + err, new Color(0xFF6B35));
+                    lobbyPanel.setButtonsEnabled(true);
+                    break;
+
+                case "RESTART_ACK":
+                    if (parts.length > 1 && "ACCEPTED".equals(parts[1])) {
+                        // Restart trận đấu
+                        state.reset();
+                        switchToGame();
+                    } else if (parts.length > 1 && "REJECTED".equals(parts[1])) {
+                        showLobby();
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        });
     }
 
     // ──────────────────────────────────────────────────────────
     //  Chuyển màn hình
     // ──────────────────────────────────────────────────────────
 
+    public void showRoomLobby() {
+        if (gamePanel != null) {
+            gamePanel.stopRendering();
+        }
+        setPreferredSize(new Dimension(580, 580));
+        pack();
+        setLocationRelativeTo(null);
+
+        cardLayout.show(rootPanel, SCREEN_ROOM);
+        roomPanel.start();
+    }
+
     private void switchToGame() {
-        // Rebuild GamePanel với client mới
+        if (roomPanel != null) {
+            roomPanel.stop();
+        }
         if (gamePanel != null) {
             gamePanel.stopRendering();
             rootPanel.remove(gamePanel);
@@ -152,7 +221,7 @@ public class GameApp extends JFrame {
         gamePanel = new GamePanel(state, client, this);
         rootPanel.add(gamePanel, SCREEN_GAME);
 
-        // Tính kích thước cửa sổ theo bản đồ + Sidebar bên trái (230px)
+        // Kích thước game: Bản đồ (15*48 = 720) + Sidebar (230) = 950px
         int mapW = GameConstants.MAP_WIDTH * 48 + 230;
         int mapH = GameConstants.MAP_HEIGHT * 48 + 40;
         setPreferredSize(new Dimension(mapW, mapH));
@@ -165,6 +234,9 @@ public class GameApp extends JFrame {
     }
 
     public void showLobby() {
+        if (roomPanel != null) {
+            roomPanel.stop();
+        }
         if (gamePanel != null) {
             gamePanel.stopRendering();
         }
@@ -174,12 +246,11 @@ public class GameApp extends JFrame {
         }
         state.reset();
 
-        // Kích thước lobby
-        setPreferredSize(new Dimension(480, 560));
+        setPreferredSize(new Dimension(500, 620));
         pack();
         setLocationRelativeTo(null);
 
-        lobbyPanel.setConnectEnabled(true);
+        lobbyPanel.setButtonsEnabled(true);
         lobbyPanel.showStatus(" ", Color.WHITE);
         cardLayout.show(rootPanel, SCREEN_LOBBY);
     }
@@ -189,12 +260,10 @@ public class GameApp extends JFrame {
     // ──────────────────────────────────────────────────────────
 
     public static void main(String[] args) {
-        // Look and Feel tối
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) {}
 
-        // Bật font antialiasing
         System.setProperty("awt.useSystemAAFontSettings", "on");
         System.setProperty("swing.aatext", "true");
 

@@ -39,6 +39,7 @@ public class GameEngine {
     private volatile boolean gameStarted = false;
     private volatile boolean gameOver = false;
     private long currentTick = 0;
+    private long seqNumber = 0; // Số thứ tự của STATE packet
 
     // Tọa độ xuất phát chuẩn 4 góc cho tối đa 4 người chơi
     private final double[][] spawnCoords = {
@@ -48,23 +49,39 @@ public class GameEngine {
             {GameConstants.MAP_WIDTH - 2.0, GameConstants.MAP_HEIGHT - 2.0} // Player 4
     };
 
+    private final String roomCode;
+    private final boolean standaloneServer;
+
     public GameEngine(int port) {
+        this.roomCode = "MAIN";
+        this.standaloneServer = true;
         this.map = new GameMap();
         this.server = new UdpServer(port, this::handlePacket);
     }
 
+    public GameEngine(UdpServer server, String roomCode) {
+        this.roomCode = roomCode;
+        this.standaloneServer = false;
+        this.map = new GameMap();
+        this.server = server;
+    }
+
     public void start() throws Exception {
-        server.start();
+        if (standaloneServer) {
+            server.start();
+        }
 
         // Bắt đầu nhịp Game Loop định kỳ (30 Ticks/giây ~ 33ms)
         gameLoopExecutor.scheduleAtFixedRate(this::tick, 0, GameConstants.TICK_INTERVAL_MS, TimeUnit.MILLISECONDS);
-        System.out.println("[GAME-ENGINE] Đã khởi động Game Loop thành công với tần số " + GameConstants.TICK_RATE + " Ticks/s.");
+        System.out.println("[GAME-ENGINE] [" + roomCode + "] Đã khởi động Game Loop thành công với tần số " + GameConstants.TICK_RATE + " Ticks/s.");
     }
 
     public void stop() {
         gameLoopExecutor.shutdown();
-        server.stop();
-        System.out.println("[GAME-ENGINE] Đã dừng Game Loop và Server.");
+        if (standaloneServer) {
+            server.stop();
+        }
+        System.out.println("[GAME-ENGINE] [" + roomCode + "] Đã dừng Game Loop.");
     }
 
     /**
@@ -94,8 +111,11 @@ public class GameEngine {
                 break;
 
             case "USE_WEAPON":
-            case "ACTION":
                 handleUseWeapon(sessionKey);
+                break;
+
+            case "ACTION":
+                handleAction(sessionKey);
                 break;
 
             case "PING":
@@ -106,15 +126,137 @@ public class GameEngine {
                 break;
 
             case "QUIT":
+            case "LEAVE_ROOM":
                 handleQuit(sessionKey);
                 break;
 
+            case "START_GAME":
+                handleStartGame(sessionKey);
+                break;
+
+            case "RESTART_VOTE":
+                if (parts.length > 1) handleRestartVote(sessionKey, parts[1].trim().toUpperCase());
+                break;
+
             default:
-                System.out.println("[GAME-ENGINE] Gói tin không xác định: " + message);
+                System.out.println("[GAME-ENGINE] [" + roomCode + "] Gói tin không xác định: " + message);
         }
     }
 
-    private synchronized void handleJoin(String playerName, InetAddress address, int port, String sessionKey) {
+    /** Phím Action: có súng thì bắn, không có thì đặt bom */
+    private void handleAction(String sessionKey) {
+        PlayerSession session = sessionsByAddress.get(sessionKey);
+        if (session == null) return;
+        if (session.getPlayer().hasWeapon()) {
+            handleUseWeapon(sessionKey);
+        } else {
+            handlePlaceBomb(sessionKey);
+        }
+    }
+
+    /** Host yêu cầu bắt đầu trận */
+    public synchronized void handleStartGame(String sessionKey) {
+        PlayerSession session = sessionsByAddress.get(sessionKey);
+        if (session == null) return;
+        if (gameState != 0) {
+            System.out.println("[GAME-ENGINE] START_GAME: game đã bắt đầu hoặc không ở trạng thái WAITING.");
+            return;
+        }
+        if (!session.isHost()) {
+            server.send("ERROR|Chỉ chủ phòng mới có thể bắt đầu trận đấu!", session.getAddress(), session.getPort());
+            return;
+        }
+        if (sessionsById.size() < GameConstants.MIN_PLAYERS_TO_START) {
+            server.send("ERROR|Chưa đủ " + GameConstants.MIN_PLAYERS_TO_START + " người chơi!", session.getAddress(), session.getPort());
+            return;
+        }
+        System.out.println("[GAME-ENGINE] Host " + session.getPlayer().getName() + " bắt đầu trận!");
+        startGame();
+    }
+
+    /** Xử lý vote restart sau GAME_OVER */
+    private synchronized void handleRestartVote(String sessionKey, String vote) {
+        if (gameState != 3) return; // Chỉ chấp nhận sau khi ENDED
+        PlayerSession session = sessionsByAddress.get(sessionKey);
+        if (session == null) return;
+        session.setRestartVote("YES".equals(vote));
+        System.out.printf("[GAME-ENGINE] Player %d vote restart: %s%n", session.getPlayer().getId(), vote);
+
+        // Đếm vote
+        int yesCount = 0; int totalCount = sessionsById.size();
+        for (PlayerSession ps : sessionsById.values()) {
+            if (Boolean.TRUE.equals(ps.getRestartVote())) yesCount++;
+        }
+        // Broadcast trạng thái vote
+        server.broadcast("RESTART_VOTE_STATUS|" + yesCount + "|" + totalCount, sessionsById.values());
+
+        if ("NO".equals(vote)) {
+            // Người NO → remove khỏi room, về lobby
+            sessionsById.remove(session.getPlayer().getId());
+            sessionsByAddress.remove(sessionKey);
+            server.send("QUIT_ACK|OK", session.getAddress(), session.getPort());
+        }
+
+        // Kiểm tra: tất cả đã vote chưa?
+        int pendingVotes = 0;
+        for (PlayerSession ps : sessionsById.values()) {
+            if (ps.getRestartVote() == null) pendingVotes++;
+        }
+        if (pendingVotes == 0) {
+            // Đếm lại YES sau khi loại NO
+            int finalYes = 0;
+            for (PlayerSession ps : sessionsById.values()) {
+                if (Boolean.TRUE.equals(ps.getRestartVote())) finalYes++;
+            }
+            if (finalYes >= GameConstants.MIN_PLAYERS_TO_START) {
+                // Restart game
+                System.out.println("[GAME-ENGINE] Chơi lại! " + finalYes + " người đồng ý.");
+                server.broadcast("RESTART_ACK|ACCEPTED", sessionsById.values());
+                resetGame();
+            } else {
+                // Không đủ người chơi, tất cả về lobby
+                System.out.println("[GAME-ENGINE] Không đủ người chơi lại, tất cả về lobby.");
+                server.broadcast("RESTART_ACK|REJECTED", sessionsById.values());
+                sessionsById.clear();
+                sessionsByAddress.clear();
+                resetGame();
+            }
+        }
+    }
+
+    /** Reset lại game để chơi trận mới */
+    private synchronized void resetGame() {
+        gameOver = false;
+        gameStarted = false;
+        gameState = 0;
+        currentTick = 0;
+        seqNumber = 0;
+        bombs.clear();
+        items.clear();
+        map.regenerate();
+        // Reset vote
+        for (PlayerSession ps : sessionsById.values()) {
+            ps.setRestartVote(null);
+        }
+        // Reset vị trí spawn người chơi
+        int idx = 0;
+        for (PlayerSession ps : sessionsById.values()) {
+            int spawnIdx = idx % spawnCoords.length;
+            ps.getPlayer().resetForNewGame(spawnCoords[spawnIdx][0], spawnCoords[spawnIdx][1]);
+            idx++;
+        }
+        // Gửi MAP_INIT mới cho tất cả
+        for (PlayerSession ps : sessionsById.values()) {
+            server.send(String.format("MAP_INIT|%d|%d|%s", map.getWidth(), map.getHeight(), map.toFlatString()),
+                    ps.getAddress(), ps.getPort());
+        }
+        // Bắt đầu AUTO nếu đủ người chơi
+        if (sessionsById.size() >= GameConstants.MIN_PLAYERS_TO_START) {
+            startGame();
+        }
+    }
+
+    public synchronized void handleJoin(String playerName, java.net.InetAddress address, int port, String sessionKey) {
         if (sessionsByAddress.containsKey(sessionKey)) {
             PlayerSession existing = sessionsByAddress.get(sessionKey);
             server.send(String.format("JOIN_ACK|%d|SUCCESS|Already joined as Player %d", existing.getPlayer().getId(), existing.getPlayer().getId()), address, port);
@@ -133,16 +275,29 @@ public class GameEngine {
 
         Player newPlayer = new Player(id, playerName, spawnX, spawnY);
         PlayerSession session = new PlayerSession(newPlayer, address, port);
+        session.setRoomCode(roomCode);
+        if (sessionsById.isEmpty()) {
+            session.setHost(true);
+        }
 
         sessionsByAddress.put(sessionKey, session);
         sessionsById.put(id, session);
 
-        System.out.printf("[GAME-ENGINE] Người chơi %s (ID=%d) đã tham gia từ %s:%d tại tọa độ (%.1f, %.1f)%n",
-                playerName, id, address.getHostAddress(), port, spawnX, spawnY);
+        System.out.printf("[GAME-ENGINE] [%s] Người chơi %s (ID=%d, Host=%b) đã tham gia từ %s:%d tại tọa độ (%.1f, %.1f)%n",
+                roomCode, playerName, id, session.isHost(), address.getHostAddress(), port, spawnX, spawnY);
 
         // Gửi phản hồi JOIN_ACK và khởi tạo bản đồ cho người chơi mới
         server.send(String.format("JOIN_ACK|%d|SUCCESS|Joined as %s", id, playerName), address, port);
         server.send(String.format("MAP_INIT|%d|%d|%s", map.getWidth(), map.getHeight(), map.toFlatString()), address, port);
+
+        if (session.isHost()) {
+            server.send(String.format("ROOM_CREATED|%s|%d", roomCode, id), address, port);
+        } else {
+            server.send(String.format("ROOM_JOINED|%s|%d|%d", roomCode, getHostPlayerId(), sessionsById.size()), address, port);
+        }
+
+        // Cập nhật danh sách người chơi trong phòng cho mọi người
+        broadcastRoomPlayers();
 
         // Gửi các vật phẩm đang có sẵn trên sân đấu
         for (Item item : items) {
@@ -217,6 +372,12 @@ public class GameEngine {
         Player player = session.getPlayer();
         if (!player.isAlive() || !player.canPlaceBomb()) return;
 
+        // Spam bomb protection: không cho đặt 2 bom trong cùng 1 tick
+        if (player.getLastBombTick() == currentTick) {
+            return;
+        }
+        player.setLastBombTick(currentTick);
+
         int gx = player.getGridX();
         int gy = player.getGridY();
 
@@ -236,7 +397,7 @@ public class GameEngine {
                 player.getId(), player.getName(), bombId, gx, gy, player.getAvailableBombs(), player.getMaxBombs());
     }
 
-    private void handleQuit(String sessionKey) {
+    public void handleQuit(String sessionKey) {
         PlayerSession session = sessionsByAddress.remove(sessionKey);
         if (session != null) {
             sessionsById.remove(session.getPlayer().getId());
@@ -245,6 +406,19 @@ public class GameEngine {
                     session.getPlayer().getName(), session.getPlayer().getId());
             server.broadcast("PLAYER_LEFT|" + session.getPlayer().getId() + "|" + session.getPlayer().getName(), sessionsById.values());
             server.broadcast("PLAYER_DIED|" + session.getPlayer().getId() + "|0", sessionsById.values());
+
+            // Chuyển host ngẫu nhiên cho người còn lại nếu host rời phòng
+            if (session.isHost() && !sessionsById.isEmpty()) {
+                List<PlayerSession> remaining = new ArrayList<>(sessionsById.values());
+                PlayerSession newHost = remaining.get(new java.util.Random().nextInt(remaining.size()));
+                newHost.setHost(true);
+                server.broadcast("PLAYER_HOST_CHANGED|" + newHost.getPlayer().getId(), sessionsById.values());
+                System.out.printf("[GAME-ENGINE] Host cũ đã rời, chuyển host ngẫu nhiên cho Player %d (%s)%n",
+                        newHost.getPlayer().getId(), newHost.getPlayer().getName());
+            }
+
+            broadcastRoomPlayers();
+
             if (gameState == 2 && !gameOver) {
                 checkGameOver();
             }
@@ -288,7 +462,22 @@ public class GameEngine {
     private void checkClientTimeouts(long now) {
         List<String> timedOutKeys = new ArrayList<>();
         for (Map.Entry<String, PlayerSession> entry : sessionsByAddress.entrySet()) {
-            if (entry.getValue().isTimedOut(now)) {
+            PlayerSession ps = entry.getValue();
+            // Disconnect timeout 5s trong trận (PLAYING): force kill player sau 5s
+            if (gameState == 2) {
+                long offlineMs = now - ps.getLastHeartbeat();
+                if (offlineMs >= GameConstants.DISCONNECT_TIMEOUT_GAME_MS) {
+                    Player p = ps.getPlayer();
+                    if (p.isAlive()) {
+                        p.setAlive(false);
+                        System.out.printf("[GAME-ENGINE] Player %d (%s) mất kết nối quá 5s trong trận → Tự thua!%n",
+                                p.getId(), p.getName());
+                        server.broadcast(String.format("PLAYER_DIED|%d|0", p.getId()), sessionsById.values());
+                        checkGameOver();
+                    }
+                }
+            }
+            if (ps.isTimedOut(now)) {
                 timedOutKeys.add(entry.getKey());
             }
         }
@@ -549,6 +738,12 @@ public class GameEngine {
         server.broadcast(String.format("WEAPON_USED|%d|%s|%d|%s|%d|%d",
                 shooter.getId(), ItemType.WEAPON_GUN.name(), shooter.getWeaponAmmo(),
                 pathSb.length() > 0 ? pathSb.toString() : "NONE", hitType, hitTargetId), sessionsById.values());
+
+        // Broadcast BULLET_START cho Client animate viên đạn
+        int endX = trajectory.isEmpty() ? (cx + dir.getDx()) : trajectory.get(trajectory.size() - 1).x;
+        int endY = trajectory.isEmpty() ? (cy + dir.getDy()) : trajectory.get(trajectory.size() - 1).y;
+        server.broadcast(String.format(java.util.Locale.US, "BULLET_START|%d|%d|%d|%d|%d",
+                shooter.getId(), cx, cy, endX, endY), sessionsById.values());
     }
 
     private void checkGameOver() {
@@ -565,6 +760,7 @@ public class GameEngine {
         if (aliveCount <= 1 && sessionsById.size() > 1) {
             gameOver = true;
             gameState = 3; // ENDED: Dừng nhận gói tin từ client
+            int winnerId = (lastSurvivor != null) ? lastSurvivor.getId() : 0;
             if (lastSurvivor != null) {
                 System.out.printf("[GAME-ENGINE] >>> TRẬN ĐẤU KẾT THÚC! NGƯỜI CHIẾN THẮNG LÀ: %s (ID=%d) <<<%n",
                         lastSurvivor.getName(), lastSurvivor.getId());
@@ -575,6 +771,8 @@ public class GameEngine {
                 System.out.println("[GAME-ENGINE] >>> TRẬN ĐẤU KẾT THÚC HÒA! KHÔNG CÒN AI SỐNG SÓT! <<<");
                 server.broadcast("GAME_OVER|0|NONE|0,0,0,0,0", sessionsById.values());
             }
+            // Gửi yêu cầu vote restart cho tất cả client
+            server.broadcast(String.format("RESTART_VOTE_REQ|%d", winnerId), sessionsById.values());
         }
     }
 
@@ -618,8 +816,40 @@ public class GameEngine {
             }
         }
 
-        String statePacket = String.format("STATE|%d|%s|%s|%s", currentTick, pSb, bSb, iSb);
+        String statePacket = String.format("STATE|%d|%d|%d|%s|%s|%s",
+                seqNumber++ % GameConstants.SEQUENCE_NUMBER_MOD,
+                System.currentTimeMillis(), currentTick, pSb, bSb, iSb);
         server.broadcast(statePacket, sessionsById.values());
+    }
+
+    /**
+     * Broadcast danh sách người chơi trong phòng cho toàn bộ client trong phòng.
+     */
+    public void broadcastRoomPlayers() {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        for (PlayerSession s : sessionsById.values()) {
+            sb.append(s.getPlayer().getName());
+            if (s.isHost()) sb.append(" [HOST]");
+            if (i < sessionsById.size() - 1) sb.append(";");
+            i++;
+        }
+        server.broadcast("ROOM_PLAYERS|" + sb.toString(), sessionsById.values());
+    }
+
+    public int getHostPlayerId() {
+        for (PlayerSession s : sessionsById.values()) {
+            if (s.isHost()) return s.getPlayer().getId();
+        }
+        return sessionsById.isEmpty() ? 0 : sessionsById.values().iterator().next().getPlayer().getId();
+    }
+
+    public int getGameState() {
+        return gameState;
+    }
+
+    public String getRoomCode() {
+        return roomCode;
     }
 
     public GameMap getMap() {

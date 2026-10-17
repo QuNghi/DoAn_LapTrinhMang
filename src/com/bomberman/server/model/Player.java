@@ -263,6 +263,59 @@ public class Player {
         return false;
     }
 
+    /**
+     * Kiểm tra người chơi có vũ khí và còn đạn hay không.
+     */
+    public boolean hasWeapon() {
+        return weapon != null && weaponAmmo > 0;
+    }
+
+    private long disconnectedAt = 0;
+    private long lastBombTick = -1;
+
+    public long getDisconnectedAt() {
+        return disconnectedAt;
+    }
+
+    public void setDisconnectedAt(long disconnectedAt) {
+        this.disconnectedAt = disconnectedAt;
+    }
+
+    public long getLastBombTick() {
+        return lastBombTick;
+    }
+
+    public void setLastBombTick(long lastBombTick) {
+        this.lastBombTick = lastBombTick;
+    }
+
+    /**
+     * Khởi tạo lại trạng thái người chơi để chuẩn bị cho trận đấu mới (Restart).
+     */
+    public void resetForNewGame(double startX, double startY) {
+        this.x = startX;
+        this.y = startY;
+        this.direction = Direction.STOP;
+        this.lastFacingDirection = Direction.DOWN;
+        this.alive = true;
+        this.score = 0;
+        this.maxBombs = 1;
+        this.availableBombs = 1;
+        this.bombRadius = com.bomberman.common.GameConstants.DEFAULT_BOMB_RADIUS;
+        this.speed = com.bomberman.common.GameConstants.PLAYER_SPEED;
+        this.hasShield = false;
+        this.weapon = null;
+        this.weaponAmmo = 0;
+        this.kills = 0;
+        this.pickedBombRange = 0;
+        this.pickedBombCount = 0;
+        this.pickedSpeed = 0;
+        this.pickedShield = 0;
+        this.pickedWeapon = 0;
+        this.disconnectedAt = 0;
+        this.lastBombTick = -1;
+    }
+
     public int getPickedBombRange() { return pickedBombRange; }
     public int getPickedBombCount() { return pickedBombCount; }
     public int getPickedSpeed() { return pickedSpeed; }

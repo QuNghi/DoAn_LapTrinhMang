@@ -92,9 +92,49 @@ public class GameClient {
         sendPacket("BOMB");
     }
 
+    /**
+     * Gửi ACTION – gom cả bom và súng vào một phím (SPACE).
+     * Server tự quyết: nếu có súng → bắn; nếu không → đặt bom.
+     */
+    public void sendAction() {
+        System.out.println("[CLIENT-ACTION] ACTION (bom hoặc súng)");
+        sendPacket("ACTION");
+    }
+
     public void sendUseWeapon() {
         System.out.println("[CLIENT-ACTION] Dùng vũ khí: USE_WEAPON");
         sendPacket("USE_WEAPON");
+    }
+
+    /** Gửi RESTART_VOTE|YES hoặc RESTART_VOTE|NO */
+    public void sendRestartVote(boolean yes) {
+        String vote = yes ? "YES" : "NO";
+        System.out.println("[CLIENT-ACTION] Restart vote: " + vote);
+        sendPacket("RESTART_VOTE|" + vote);
+    }
+
+    /** Gửi CREATE_ROOM|để tạo phòng mới */
+    public void sendCreateRoom(String playerName) {
+        System.out.println("[CLIENT-ACTION] Tạo phòng mới");
+        sendPacket("CREATE_ROOM|" + playerName);
+    }
+
+    /** Gửi JOIN_ROOM|roomCode|để vào phòng theo mã */
+    public void sendJoinRoom(String roomCode, String playerName) {
+        System.out.println("[CLIENT-ACTION] Vào phòng: " + roomCode);
+        sendPacket("JOIN_ROOM|" + roomCode + "|" + playerName);
+    }
+
+    /** Gửi START_GAME (chỉ host dùng) */
+    public void sendStartGame() {
+        System.out.println("[CLIENT-ACTION] Host start game");
+        sendPacket("START_GAME");
+    }
+
+    /** Gửi LEAVE_ROOM để rời phòng hiện tại */
+    public void sendLeaveRoom() {
+        System.out.println("[CLIENT-ACTION] Rời phòng");
+        sendPacket("LEAVE_ROOM");
     }
 
     public void sendPacket(String message) {
@@ -146,6 +186,30 @@ public class GameClient {
             case "JOIN_ACK":
                 handleJoinAck(parts);
                 break;
+            case "ROOM_CREATED":
+                if (parts.length > 1) state.myRoomCode = parts[1];
+                state.imHost = true;
+                break;
+            case "ROOM_JOINED":
+                if (parts.length > 1) state.myRoomCode = parts[1];
+                if (parts.length > 2) {
+                    try {
+                        int hid = Integer.parseInt(parts[2]);
+                        state.imHost = (state.myPlayerId == hid);
+                    } catch (Exception ignored) {}
+                }
+                break;
+            case "ROOM_PLAYERS":
+                state.parseRoomPlayers(parts);
+                break;
+            case "PLAYER_HOST_CHANGED":
+                if (parts.length > 1) {
+                    try {
+                        int nhid = Integer.parseInt(parts[1]);
+                        state.imHost = (state.myPlayerId == nhid);
+                    } catch (Exception ignored) {}
+                }
+                break;
             case "MAP_INIT":
                 state.parseMapInit(parts);
                 break;
@@ -191,6 +255,23 @@ public class GameClient {
                 break;
             case "GAME_OVER":
                 state.parseGameOver(parts);
+                break;
+            case "BULLET_START":
+                state.parseBulletStart(parts);
+                break;
+            case "RESTART_VOTE_REQ":
+                state.restartVoting = true;
+                state.restartVotesYes = 0;
+                state.restartVotesTotal = 0;
+                break;
+            case "RESTART_VOTE_STATUS":
+                // RESTART_VOTE_STATUS|yes|total
+                if (parts.length >= 3) {
+                    try {
+                        state.restartVotesYes = Integer.parseInt(parts[1]);
+                        state.restartVotesTotal = Integer.parseInt(parts[2]);
+                    } catch (Exception ignored) {}
+                }
                 break;
             default:
                 break;

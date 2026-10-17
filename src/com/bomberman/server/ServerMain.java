@@ -1,13 +1,17 @@
 package com.bomberman.server;
 
 import com.bomberman.common.GameConstants;
-import com.bomberman.server.logic.GameEngine;
+import com.bomberman.server.model.Player;
+import com.bomberman.server.model.Room;
 import com.bomberman.server.network.PlayerSession;
+import com.bomberman.server.network.UdpServer;
 
+import javax.swing.*;
+import java.awt.GraphicsEnvironment;
 import java.util.Scanner;
 
 /**
- * Lớp khởi chạy chính của Server Bomberman (Thành viên 1).
+ * Lớp khởi chạy chính của Server Bomberman (Hỗ trợ Multi-Room và ServerFrame GUI).
  */
 public class ServerMain {
     public static void main(String[] args) {
@@ -21,47 +25,96 @@ public class ServerMain {
         }
 
         System.out.println("==========================================================");
-        System.out.println("   BOMBERMAN MULTIPLAYER UDP SERVER - BACKEND CORE        ");
-        System.out.println("   Thành viên 1: The Network & Server Lead                ");
+        System.out.println("   BOMBERMAN MULTIPLAYER UDP SERVER - MULTI-ROOM ENGINE   ");
         System.out.println("==========================================================");
         System.out.println("Khởi động Server tại cổng: " + port);
 
         try {
-            GameEngine engine = new GameEngine(port);
-            engine.start();
+            // Khởi tạo UDP Socket và Bộ quản lý đa phòng
+            UdpServer udpServer = new UdpServer(port, null);
+            RoomManager roomManager = new RoomManager(udpServer);
+            udpServer.start();
+
+            // Khởi động GUI ServerFrame nếu hỗ trợ hiển thị (desktop environment)
+            final int serverPort = port;
+            if (!GraphicsEnvironment.isHeadless()) {
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+                    } catch (Exception ignored) {}
+                    ServerFrame frame = new ServerFrame(roomManager, serverPort);
+                    frame.setVisible(true);
+                });
+            }
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 System.out.println("\nĐang tắt Server an toàn...");
-                engine.stop();
+                roomManager.stopAll();
             }));
 
             System.out.println("Server đã sẵn sàng! Gõ lệnh hỗ trợ:");
-            System.out.println("  'start'  -> Bắt đầu trận đấu ngay với số người hiện có");
-            System.out.println("  'status' -> Xem danh sách người chơi đang kết nối");
-            System.out.println("  'stop'   -> Dừng Server và thoát");
+            System.out.println("  'rooms'                       -> Liệt kê danh sách tất cả các phòng");
+            System.out.println("  'room <code> start'           -> Bắt đầu trận đấu trong phòng chỉ định");
+            System.out.println("  'room <code> kick <playerId>' -> Đuổi người chơi khỏi phòng");
+            System.out.println("  'room <code> delete'          -> Xóa phòng chỉ định");
+            System.out.println("  'status'                      -> Xem tổng số người chơi đang kết nối");
+            System.out.println("  'stop' / 'exit'               -> Dừng Server và thoát");
             System.out.println("----------------------------------------------------------");
 
             Scanner scanner = new Scanner(System.in);
-            while (true) {
-                String cmd = scanner.nextLine().trim().toLowerCase();
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine().trim();
+                if (line.isEmpty()) continue;
+                String[] tokens = line.split("\\s+");
+                String cmd = tokens[0].toLowerCase();
+
                 if (cmd.equals("stop") || cmd.equals("exit")) {
-                    engine.stop();
+                    roomManager.stopAll();
                     System.out.println("Server đã dừng.");
                     System.exit(0);
-                } else if (cmd.equals("start")) {
-                    engine.startGame();
-                } else if (cmd.equals("status")) {
-                    System.out.println("--- DANH SÁCH NGƯỜI CHƠI (" + engine.getSessionsById().size() + ") ---");
-                    for (PlayerSession session : engine.getSessionsById().values()) {
-                        System.out.printf("  Player ID: %d | Tên: %-10s | Sống: %-5s | Tọa độ: (%.2f, %.2f) | IP: %s:%d%n",
-                                session.getPlayer().getId(),
-                                session.getPlayer().getName(),
-                                session.getPlayer().isAlive(),
-                                session.getPlayer().getX(),
-                                session.getPlayer().getY(),
-                                session.getAddress().getHostAddress(),
-                                session.getPort());
+                } else if (cmd.equals("rooms")) {
+                    System.out.println("--- DANH SÁCH CÁC PHÒNG (" + roomManager.getAllRooms().size() + ") ---");
+                    for (Room r : roomManager.getAllRooms()) {
+                        System.out.printf("  Phòng: [%-4s] | Trạng thái: %-9s | Người chơi: %d/%d | Host: P%d%n",
+                                r.getRoomCode(), r.getStateName(), r.getPlayerCount(),
+                                GameConstants.MAX_PLAYERS, r.getHostPlayerId());
                     }
+                } else if (cmd.equals("status")) {
+                    System.out.println("--- TỔNG QUAN HỆ THỐNG ---");
+                    System.out.println("  Tổng số phòng: " + roomManager.getAllRooms().size());
+                    System.out.println("  Tổng số người chơi: " + roomManager.getTotalPlayers());
+                    for (Room r : roomManager.getAllRooms()) {
+                        System.out.println("  [Phòng " + r.getRoomCode() + " - " + r.getStateName() + "]:");
+                        for (PlayerSession session : r.getSessions()) {
+                            Player p = session.getPlayer();
+                            System.out.printf("    Player ID: %d | Tên: %-10s | Host: %-5s | Sống: %-5s | Tọa độ: (%.2f, %.2f) | IP: %s:%d%n",
+                                    p.getId(), p.getName(), session.isHost(), p.isAlive(), p.getX(), p.getY(),
+                                    session.getAddress().getHostAddress(), session.getPort());
+                        }
+                    }
+                } else if (cmd.equals("room") && tokens.length >= 3) {
+                    String roomCode = tokens[1].toUpperCase();
+                    String action = tokens[2].toLowerCase();
+
+                    if (action.equals("start")) {
+                        roomManager.forceStartRoom(roomCode);
+                        System.out.println("[CMD] Đã gửi lệnh bắt đầu cho phòng [" + roomCode + "].");
+                    } else if (action.equals("delete")) {
+                        roomManager.deleteRoom(roomCode);
+                        System.out.println("[CMD] Đã xóa phòng [" + roomCode + "].");
+                    } else if (action.equals("kick") && tokens.length >= 4) {
+                        try {
+                            int kickId = Integer.parseInt(tokens[3]);
+                            roomManager.kickPlayer(roomCode, kickId);
+                            System.out.println("[CMD] Đã kick Player " + kickId + " khỏi phòng [" + roomCode + "].");
+                        } catch (NumberFormatException e) {
+                            System.out.println("[ERROR] ID người chơi không hợp lệ.");
+                        }
+                    } else {
+                        System.out.println("[ERROR] Cú pháp lệnh room không đúng. Gõ 'rooms' để xem danh sách.");
+                    }
+                } else {
+                    System.out.println("[WARN] Lệnh không nhận diện: " + line);
                 }
             }
         } catch (Exception e) {

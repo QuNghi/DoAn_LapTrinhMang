@@ -14,6 +14,7 @@ public class ClientGameState {
 
     // ───── Trạng thái kết nối ─────
     public volatile int myPlayerId = -1;
+    public volatile String myPlayerName = "";
     public volatile boolean connected = false;
     public volatile boolean gameStarted = false;
     public volatile boolean gameOver = false;
@@ -24,6 +25,24 @@ public class ClientGameState {
     public volatile int winnerSpeed = 0;
     public volatile int winnerShield = 0;
     public volatile int winnerGun = 0;
+
+    // ───── Victory / Defeat screen (hiện 3 giây trước kết quả) ─────
+    public volatile boolean showVictoryScreen = false;
+    public volatile long victoryScreenStartMs = 0;
+    public static final long VICTORY_SCREEN_DURATION_MS = 3000;
+
+    // ───── Restart vote ─────
+    public volatile boolean restartVoting = false;
+    public volatile int restartVotesYes = 0;
+    public volatile int restartVotesTotal = 0;
+
+    // ───── Room ─────
+    public volatile String myRoomCode = "";
+    public volatile boolean imHost = false;
+    public final List<String> roomPlayerNames = new CopyOnWriteArrayList<>();
+
+    // ───── Sequence number (lọc out-of-order packet) ─────
+    public volatile long lastReceivedSeq = -1;
 
     // ───── Đếm ngược trận đấu ─────
     public volatile int countdownSeconds = -1;
@@ -46,6 +65,9 @@ public class ClientGameState {
 
     // ───── Hiệu ứng nổ (flame cells) ─────
     public final List<ExplosionEffect> explosions = new CopyOnWriteArrayList<>();
+
+    // ───── Animation viên đạn bay ─────
+    public final List<BulletData> bullets = new CopyOnWriteArrayList<>();
 
     // ───── Thứ tự người sống sót ─────
     public final List<Integer> eliminationOrder = new CopyOnWriteArrayList<>(); // ID người bị loại theo thứ tự
@@ -109,6 +131,39 @@ public class ClientGameState {
         }
     }
 
+    /**
+     * Biểu diễn viên đạn đang bay trên client (animation interpolation).
+     * Server gửi BULLET_START|shooterId|fromX|fromY|toX|toY
+     */
+    public static class BulletData {
+        public int shooterId;
+        public float fromX, fromY;   // tọa độ xuất phát (tile grid - float)
+        public float toX, toY;       // tọa độ kết thúc
+        public long startTimeMs;
+        public static final long DURATION_MS = 280; // 280ms bay hết
+
+        public BulletData(int shooterId, float fromX, float fromY, float toX, float toY) {
+            this.shooterId = shooterId;
+            this.fromX = fromX; this.fromY = fromY;
+            this.toX = toX; this.toY = toY;
+            this.startTimeMs = System.currentTimeMillis();
+        }
+
+        /** Tiến độ bay 0.0 → 1.0 */
+        public float getProgress() {
+            float p = (System.currentTimeMillis() - startTimeMs) / (float) DURATION_MS;
+            return Math.min(1f, p);
+        }
+
+        public boolean isExpired() {
+            return getProgress() >= 1f;
+        }
+
+        /** Vị trí hiện tại (grid float) interpolate tuyến tính */
+        public float getCurrentX() { return fromX + (toX - fromX) * getProgress(); }
+        public float getCurrentY() { return fromY + (toY - fromY) * getProgress(); }
+    }
+
     // ──────────────────────────────────────────────────────────
     //  Các phương thức parse gói tin từ Server
     // ──────────────────────────────────────────────────────────
@@ -137,16 +192,39 @@ public class ClientGameState {
     }
 
     /**
-     * Xử lý STATE|tick|players_data|bombs_data|items_data
+     * Xử lý STATE packet.
+     * Định dạng mới (7 phần): STATE|seq|timestamp|tick|players_data|bombs_data|items_data
+     * Định dạng cũ (5 phần):  STATE|tick|players_data|bombs_data|items_data
      */
     public void parseState(String[] parts) {
         if (parts.length < 4) return;
         try {
-            latestTick = Long.parseLong(parts[1]);
+            int pIndex = 2;
+            int bIndex = 3;
+            int iIndex = 4;
+
+            if (parts.length >= 7) {
+                // Định dạng mới có Sequence Number + Timestamp
+                long seq = Long.parseLong(parts[1]);
+                // Lọc out-of-order packet: bỏ qua nếu seq cũ hơn hoặc bằng (xử lý modulo)
+                if (lastReceivedSeq >= 0) {
+                    long diff = (seq - lastReceivedSeq + GameConstants.SEQUENCE_NUMBER_MOD) % GameConstants.SEQUENCE_NUMBER_MOD;
+                    if (diff > GameConstants.SEQUENCE_NUMBER_MOD / 2 || diff == 0) {
+                        return; // Packet cũ hoặc trùng lặp, bỏ qua
+                    }
+                }
+                lastReceivedSeq = seq;
+                latestTick = Long.parseLong(parts[3]);
+                pIndex = 4;
+                bIndex = 5;
+                iIndex = 6;
+            } else {
+                latestTick = Long.parseLong(parts[1]);
+            }
 
             // --- Players ---
-            if (!parts[2].equals("NONE") && !parts[2].isEmpty()) {
-                for (String pStr : parts[2].split(";")) {
+            if (parts.length > pIndex && !parts[pIndex].equals("NONE") && !parts[pIndex].isEmpty()) {
+                for (String pStr : parts[pIndex].split(";")) {
                     String[] f = pStr.split(",");
                     if (f.length < 8) continue;
                     int id = Integer.parseInt(f[0]);
@@ -176,8 +254,8 @@ public class ClientGameState {
 
             // --- Bombs ---
             bombs.clear();
-            if (!parts[3].equals("NONE") && !parts[3].isEmpty()) {
-                for (String bStr : parts[3].split(";")) {
+            if (parts.length > bIndex && !parts[bIndex].equals("NONE") && !parts[bIndex].isEmpty()) {
+                for (String bStr : parts[bIndex].split(";")) {
                     String[] f = bStr.split(",");
                     if (f.length < 4) continue;
                     BombData bd = new BombData();
@@ -191,8 +269,8 @@ public class ClientGameState {
 
             // --- Items ---
             items.clear();
-            if (parts.length > 4 && !parts[4].equals("NONE") && !parts[4].isEmpty()) {
-                for (String iStr : parts[4].split(";")) {
+            if (parts.length > iIndex && !parts[iIndex].equals("NONE") && !parts[iIndex].isEmpty()) {
+                for (String iStr : parts[iIndex].split(";")) {
                     String[] f = iStr.split(",");
                     if (f.length < 4) continue;
                     ItemData item = new ItemData();
@@ -296,12 +374,16 @@ public class ClientGameState {
      */
     public void cleanupExpiredExplosions() {
         explosions.removeIf(ExplosionEffect::isExpired);
+        bullets.removeIf(BulletData::isExpired);
     }
 
     /**
      * Đặt tên người chơi (nhận từ JOIN_ACK).
      */
     public void setPlayerName(int id, String name) {
+        if (id == myPlayerId) {
+            myPlayerName = name;
+        }
         PlayerData pd = players.computeIfAbsent(id, k -> {
             PlayerData np = new PlayerData();
             np.id = k;
@@ -333,9 +415,13 @@ public class ClientGameState {
 
     /**
      * Xử lý GAME_OVER|winnerId|winnerName|summaryItems
+     * Không set gameOver ngay – chờ sau 3 giây Victory Screen.
      */
     public void parseGameOver(String[] parts) {
-        gameOver = true;
+        // Hiện Victory/Defeat screen trước
+        showVictoryScreen = true;
+        victoryScreenStartMs = System.currentTimeMillis();
+        // gameOver sẽ được set = true sau 3 giây bởi GamePanel
         if (parts.length > 1) {
             try { winnerPlayerId = Integer.parseInt(parts[1]); } catch (Exception ignored) {}
         }
@@ -346,14 +432,29 @@ public class ClientGameState {
             String[] it = parts[3].split(",");
             if (it.length >= 5) {
                 try {
-                    winnerRange = Integer.parseInt(it[0]);
-                    winnerCount = Integer.parseInt(it[1]);
-                    winnerSpeed = Integer.parseInt(it[2]);
+                    winnerRange  = Integer.parseInt(it[0]);
+                    winnerCount  = Integer.parseInt(it[1]);
+                    winnerSpeed  = Integer.parseInt(it[2]);
                     winnerShield = Integer.parseInt(it[3]);
-                    winnerGun = Integer.parseInt(it[4]);
+                    winnerGun    = Integer.parseInt(it[4]);
                 } catch (Exception ignored) {}
             }
         }
+    }
+
+    /**
+     * Xử lý BULLET_START|shooterId|fromX|fromY|toX|toY
+     */
+    public void parseBulletStart(String[] parts) {
+        if (parts.length < 6) return;
+        try {
+            int sid  = Integer.parseInt(parts[1]);
+            float fx = Float.parseFloat(parts[2]);
+            float fy = Float.parseFloat(parts[3]);
+            float tx = Float.parseFloat(parts[4]);
+            float ty = Float.parseFloat(parts[5]);
+            bullets.add(new BulletData(sid, fx, fy, tx, ty));
+        } catch (Exception ignored) {}
     }
 
     /**
@@ -372,6 +473,20 @@ public class ClientGameState {
     }
 
     /**
+     * Xử lý ROOM_PLAYERS|name1;name2;...
+     */
+    public void parseRoomPlayers(String[] parts) {
+        roomPlayerNames.clear();
+        if (parts.length > 1 && !parts[1].trim().isEmpty()) {
+            for (String n : parts[1].split(";")) {
+                if (!n.trim().isEmpty()) {
+                    roomPlayerNames.add(n.trim());
+                }
+            }
+        }
+    }
+
+    /**
      * Reset toàn bộ state về trạng thái ban đầu.
      */
     public void reset() {
@@ -380,9 +495,18 @@ public class ClientGameState {
         items.clear();
         explosions.clear();
         eliminationOrder.clear();
+        bullets.clear();
+        roomPlayerNames.clear();
+        myRoomCode = "";
+        imHost = false;
         mapGrid = new int[GameConstants.MAP_HEIGHT][GameConstants.MAP_WIDTH];
         gameStarted = false;
         gameOver = false;
+        showVictoryScreen = false;
+        victoryScreenStartMs = 0;
+        restartVoting = false;
+        restartVotesYes = 0;
+        restartVotesTotal = 0;
         winnerPlayerId = -1;
         winnerName = "";
         winnerRange = 0;
@@ -394,5 +518,6 @@ public class ClientGameState {
         countdownText = "";
         countdownStartTime = 0;
         latestTick = 0;
+        lastReceivedSeq = -1;
     }
 }
