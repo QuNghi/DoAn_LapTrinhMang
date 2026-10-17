@@ -285,10 +285,12 @@ public class ClientGameState {
 
             // --- Players ---
             if (parts.length > pIndex && !parts[pIndex].equals("NONE") && !parts[pIndex].isEmpty()) {
+                Set<Integer> currentActiveIds = new HashSet<>();
                 for (String pStr : parts[pIndex].split(";")) {
                     String[] f = pStr.split(",");
                     if (f.length < 8) continue;
                     int id = Integer.parseInt(f[0]);
+                    currentActiveIds.add(id);
                     PlayerData pd = players.computeIfAbsent(id, k -> {
                         PlayerData np = new PlayerData();
                         np.id = k;
@@ -310,6 +312,10 @@ public class ClientGameState {
                         pd.pickedShield = Integer.parseInt(f[12]);
                         pd.pickedWeapon = Integer.parseInt(f[13]);
                     }
+                }
+                // Dọn sạch các nhân vật cũ/đã rời trận không còn được gửi trong STATE của Server
+                if (!currentActiveIds.isEmpty()) {
+                    players.keySet().removeIf(id -> !currentActiveIds.contains(id));
                 }
             }
 
@@ -615,6 +621,15 @@ public class ClientGameState {
                 }
             }
         }
+
+        // Đồng bộ danh sách players: loại bỏ mọi PlayerData không còn trong roomSlots
+        Set<Integer> validSlotIds = new HashSet<>();
+        for (RoomSlot slot : roomSlots) {
+            validSlotIds.add(slot.id);
+        }
+        if (!validSlotIds.isEmpty()) {
+            players.keySet().removeIf(id -> !validSlotIds.contains(id));
+        }
     }
 
     /**
@@ -636,6 +651,20 @@ public class ClientGameState {
         explosions.clear();
         bullets.clear();
         eliminationOrder.clear();
+
+        // Thu thập các ID đang có trong roomSlots (những người thực sự còn trong phòng)
+        Set<Integer> validIds = new HashSet<>();
+        for (RoomSlot slot : roomSlots) {
+            validIds.add(slot.id);
+        }
+
+        // Loại bỏ các PlayerData rác/đã rời khỏi map
+        if (!validIds.isEmpty()) {
+            players.keySet().removeIf(id -> !validIds.contains(id));
+        } else {
+            players.clear();
+        }
+
         for (PlayerData pd : players.values()) {
             pd.alive = true;
             pd.kills = 0;

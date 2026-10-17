@@ -116,6 +116,9 @@ public class GameMap {
                 break;
         }
 
+        // Đảm bảo 100% 4 góc spawn và các ô liền kề hoàn toàn trống (không có gạch/tường)
+        clearSpawnCorners();
+
         // Đếm tổng số gạch mềm
         initialSoftBricks = 0;
         for (int y = 0; y < height; y++) {
@@ -259,6 +262,31 @@ public class GameMap {
         if (cy + 1 < height) safe[cy + 1][cx] = true;
         if (cx - 1 >= 0) safe[cy][cx - 1] = true;
         if (cx + 1 < width) safe[cy][cx + 1] = true;
+    }
+
+    /**
+     * Dọn sạch hoàn toàn 4 góc spawn và các ô thoát góc liền kề thành EMPTY (0).
+     * Ngăn chặn tuyệt đối tình trạng nhân vật bị kẹt/dính vào khối khi bắt đầu bất kỳ ván đấu nào.
+     */
+    public void clearSpawnCorners() {
+        int[][] cornerTiles = {
+            // Góc trên-trái (Player 1)
+            {1, 1}, {2, 1}, {1, 2},
+            // Góc trên-phải (Player 2)
+            {width - 2, 1}, {width - 3, 1}, {width - 2, 2},
+            // Góc dưới-trái (Player 3)
+            {1, height - 2}, {2, height - 2}, {1, height - 3},
+            // Góc dưới-phải (Player 4)
+            {width - 2, height - 2}, {width - 3, height - 2}, {width - 2, height - 3}
+        };
+
+        for (int[] tile : cornerTiles) {
+            int tx = tile[0];
+            int ty = tile[1];
+            if (tx >= 1 && tx < width - 1 && ty >= 1 && ty < height - 1) {
+                grid[ty][tx] = TileType.EMPTY.getCode();
+            }
+        }
     }
 
     public int getWidth() {

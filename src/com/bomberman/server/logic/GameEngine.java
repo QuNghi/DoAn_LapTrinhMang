@@ -358,11 +358,36 @@ public class GameEngine {
         gameOver = false;
         System.out.println("[GAME-ENGINE] >>> BẮT ĐẦU ĐẾM NGƯỢC 3 GIÂY TRƯỚC TRẬN ĐẤU! <<<");
 
-        // Đồng bộ danh sách tên người chơi trước khi bắt đầu trận
+        // Dọn sạch bom, vật phẩm và đạn còn sót lại từ ván trước (nếu có)
+        bombs.clear();
+        items.clear();
+        bullets.clear();
+
+        // Tái tạo map và đảm bảo 4 góc trống rỗng
+        map.regenerate(selectedMapType);
+
+        // Gán lại vị trí xuất phát 4 góc chuẩn mực cho tất cả người chơi trong phòng (0=TL, 1=TR, 2=BL, 3=BR)
+        int idx = 0;
+        for (PlayerSession ps : sessionsById.values()) {
+            int spawnIdx = idx % spawnCoords.length;
+            double sx = spawnCoords[spawnIdx][0];
+            double sy = spawnCoords[spawnIdx][1];
+            ps.getPlayer().resetForNewGame(sx, sy);
+            System.out.printf("[GAME-ENGINE] Spawn Player %d (%s) tại góc %d (%.1f, %.1f)%n",
+                    ps.getPlayer().getId(), ps.getPlayer().getName(), spawnIdx + 1, sx, sy);
+            idx++;
+        }
+
+        // Gửi ngay bản đồ mới MAP_INIT và thông tin Player cho toàn bộ Client
         for (PlayerSession s : sessionsById.values()) {
+            server.send(String.format("MAP_INIT|%d|%d|%s", map.getWidth(), map.getHeight(), map.toFlatString()),
+                    s.getAddress(), s.getPort());
             server.broadcast(String.format("PLAYER_INFO|%d|%s|%d",
                     s.getPlayer().getId(), s.getPlayer().getName(), s.isHost() ? 1 : 0), sessionsById.values());
         }
+
+        // Gửi STATE đầu tiên để tất cả Client dịch chuyển ngay về 4 góc
+        broadcastWorldState();
 
         // Broadcast đếm ngược ban đầu
         server.broadcast("COUNTDOWN|3", sessionsById.values());

@@ -273,7 +273,14 @@ public class GamePanel extends JPanel implements KeyListener {
         int cardH = 132;
         int gap = 8;
 
-        List<ClientGameState.PlayerData> sortedPlayers = new ArrayList<>(state.players.values());
+        List<ClientGameState.PlayerData> sortedPlayers = new ArrayList<>();
+        for (ClientGameState.PlayerData p : state.players.values()) {
+            // Không vẽ các thẻ player rác/đã rời trận hoàn toàn
+            if (p.name != null && p.name.contains("(Rời)")) {
+                continue;
+            }
+            sortedPlayers.add(p);
+        }
         sortedPlayers.sort(Comparator.comparingInt(p -> p.id));
 
         for (int i = 0; i < sortedPlayers.size() && i < 4; i++) {
@@ -655,8 +662,8 @@ public class GamePanel extends JPanel implements KeyListener {
             Color pc = getPlayerColor(pd.id);
             Color pcDark = getPlayerDark(pd.id);
 
-            // Khi người chơi bị tiêu diệt: không để lại bóng mờ trong sân đấu
-            if (!pd.alive) {
+            // Khi người chơi bị tiêu diệt hoặc đã rời khỏi phòng: không để lại bóng mờ trong sân đấu
+            if (!pd.alive || (pd.name != null && pd.name.contains("(Rời)"))) {
                 continue;
             }
 
