@@ -164,12 +164,27 @@ public class Player {
         return maxBombs;
     }
 
+    public void setMaxBombs(int maxBombs) {
+        this.maxBombs = maxBombs;
+        if (this.availableBombs > maxBombs) {
+            this.availableBombs = maxBombs;
+        }
+    }
+
     public int getAvailableBombs() {
         return availableBombs;
     }
 
+    public void setAvailableBombs(int availableBombs) {
+        this.availableBombs = Math.max(0, Math.min(this.maxBombs, availableBombs));
+    }
+
     public int getCurrentPlacedBombs() {
-        return maxBombs - availableBombs;
+        return Math.max(0, maxBombs - availableBombs);
+    }
+
+    public int getPlacedBombs() {
+        return getCurrentPlacedBombs();
     }
 
     public boolean hasShield() {

@@ -435,7 +435,16 @@ public class GameEngine {
         session.updateHeartbeat();
 
         Player player = session.getPlayer();
-        if (!player.isAlive() || !player.canPlaceBomb()) return;
+        if (!player.isAlive()) return;
+
+        // Luôn đồng bộ chuẩn xác số bom khả dụng với số bom thực tế trên sàn
+        syncPlayerBombs(player);
+
+        if (!player.canPlaceBomb()) {
+            System.out.printf("[GAME-ENGINE] Player %d (%s) KHÔNG THỂ ĐẶT BOM: đã hết bom (0/%d quả có thể đặt)%n",
+                    player.getId(), player.getName(), player.getMaxBombs());
+            return;
+        }
 
         // Spam bomb protection: không cho đặt 2 bom trong cùng 1 tick
         if (player.getLastBombTick() == currentTick) {
@@ -457,9 +466,26 @@ public class GameEngine {
         Bomb bomb = new Bomb(bombId, player.getId(), gx, gy, GameConstants.BOMB_COUNTDOWN_MS, player.getBombRadius());
         bombs.add(bomb);
         player.onBombPlaced();
+        syncPlayerBombs(player);
 
-        System.out.printf("[GAME-ENGINE] Player %d (%s) đặt quả bom %s tại ô (%d, %d) | Còn %d/%d quả có thể đặt%n",
-                player.getId(), player.getName(), bombId, gx, gy, player.getAvailableBombs(), player.getMaxBombs());
+        System.out.printf("[GAME-ENGINE] Player %d (%s) đặt quả bom %s tại ô (%d, %d) | Còn %d/%d quả có thể đặt (Đã đặt: %d)%n",
+                player.getId(), player.getName(), bombId, gx, gy, player.getAvailableBombs(), player.getMaxBombs(), player.getPlacedBombs());
+    }
+
+    public int getActiveBombsCount(int playerId) {
+        int count = 0;
+        for (Bomb b : bombs) {
+            if (b.getOwnerId() == playerId && !b.isExploded()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public void syncPlayerBombs(Player player) {
+        if (player == null) return;
+        int activeCount = getActiveBombsCount(player.getId());
+        player.setAvailableBombs(player.getMaxBombs() - activeCount);
     }
 
     public void handleQuit(String sessionKey) {
@@ -629,6 +655,9 @@ public class GameEngine {
             for (Item item : items) {
                 if (item.getGridX() == px && item.getGridY() == py) {
                     boolean applied = player.applyItem(item.getType());
+                    if (applied && item.getType() == ItemType.BOMB_COUNT) {
+                        syncPlayerBombs(player);
+                    }
                     items.remove(item);
 
                     System.out.printf("[GAME-ENGINE] Player %d (%s) nhặt vật phẩm %s (%s). Kích hoạt=%b%n",
@@ -645,20 +674,33 @@ public class GameEngine {
 
     private void updateBombs() {
         List<Bomb> explodedBombs = new ArrayList<>();
-        List<Player> allPlayers = new ArrayList<>();
-        for (PlayerSession s : sessionsById.values()) {
-            allPlayers.add(s.getPlayer());
-        }
-
         for (Bomb bomb : bombs) {
             if (bomb.update(GameConstants.TICK_INTERVAL_MS)) {
                 explodedBombs.add(bomb);
             }
         }
+        if (!explodedBombs.isEmpty()) {
+            processExplodedBombs(explodedBombs);
+        }
+    }
+
+    /**
+     * Xử lý vụ nổ cho danh sách bom (kích nổ theo thời gian hoặc do súng bắn trúng).
+     * Đảm bảo hoàn trả bom cho người chơi và broadcast hiệu ứng nổ.
+     */
+    private void processExplodedBombs(List<Bomb> initialExplodedBombs) {
+        if (initialExplodedBombs == null || initialExplodedBombs.isEmpty()) return;
+
+        List<Bomb> explodedBombs = new ArrayList<>(initialExplodedBombs);
+        List<Player> allPlayers = new ArrayList<>();
+        for (PlayerSession s : sessionsById.values()) {
+            allPlayers.add(s.getPlayer());
+        }
 
         // Duyệt danh sách các quả bom phát nổ (hỗ trợ nổ dây chuyền cascade)
         for (int bIdx = 0; bIdx < explodedBombs.size(); bIdx++) {
             Bomb bomb = explodedBombs.get(bIdx);
+            bomb.triggerExplosion();
 
             // Xử lý nổ (bao gồm rơi vật phẩm, phá hủy gạch, phá khiên / diệt player, cháy vật phẩm trên sàn)
             ExplosionHandler.ExplosionResult result = ExplosionHandler.processExplosion(
@@ -671,10 +713,11 @@ public class GameEngine {
                 }
             }
 
-            // Hoàn lại số lượng bom cho chủ nhân
+            // Hoàn lại số lượng bom cho chủ nhân và đồng bộ chuẩn xác
             PlayerSession ownerSession = sessionsById.get(bomb.getOwnerId());
             if (ownerSession != null) {
                 ownerSession.getPlayer().onBombExploded();
+                syncPlayerBombs(ownerSession.getPlayer());
                 System.out.printf("[GAME-ENGINE] Quả bom %s nổ -> Hoàn lại 1 bom cho Player %d (%s) (Hiện có: %d/%d quả có thể đặt)%n",
                         bomb.getId(), ownerSession.getPlayer().getId(), ownerSession.getPlayer().getName(),
                         ownerSession.getPlayer().getAvailableBombs(), ownerSession.getPlayer().getMaxBombs());
@@ -734,6 +777,11 @@ public class GameEngine {
 
         // Loại bỏ các quả bom đã nổ xong khỏi danh sách
         bombs.removeIf(Bomb::isExploded);
+
+        // Kiểm tra điều kiện kết thúc trận nếu bom nổ diệt người chơi
+        if (gameStarted && !gameOver) {
+            checkGameOver();
+        }
     }
 
     /**
@@ -856,12 +904,12 @@ public class GameEngine {
                 continue;
             }
 
-            // 5. Kiểm tra va chạm với Bom -> Kích nổ bom
+            // 5. Kiểm tra va chạm với Bom -> Kích nổ bom ngay lập tức (kích hoạt nổ và hoàn lại bom)
             for (Bomb b : bombs) {
                 if (!b.isExploded() && b.getGridX() == gx && b.getGridY() == gy) {
                     bullet.setActive(false);
-                    b.triggerExplosion();
                     server.broadcast("BULLET_HIT|" + bullet.getId() + "|BOMB", sessionsById.values());
+                    processExplodedBombs(java.util.Collections.singletonList(b));
                     break;
                 }
             }
