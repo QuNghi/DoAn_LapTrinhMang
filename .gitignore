@@ -1,0 +1,25 @@
+# Build / Compiled output
+bin/
+build/
+dist/
+*.class
+
+# IDE & Editor configs
+.idea/
+*.iml
+.vscode/
+nbproject/private/
+
+# Word temp files & documents not needed for grading
+~$*
+*.docx
+*.doc
+Hoang.docx
+Ke Hoach.docx
+
+# Planning, notes & internal task files
+task.md
+CONG_NGHE_DONG_BO*
+[cC][oO][nN][gG]_[nN][gG][hH][eE]_[dD][oO][nN][gG]_[bB][oO]*
+[kK][eE]*[hH][oO][aA][cC][hH]*
+planttext_bomberman.puml

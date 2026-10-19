@@ -1,0 +1,239 @@
+@startuml Architecture
+title SƠ ĐỒ KIẾN TRÚC HỆ THỐNG GAME BOMBERMAN MULTIPLAYER (UDP)
+
+node "Client 1 (JavaFX / Swing)" as C1 {
+  [UI & Input Controller] as UI1
+  [Client Network & Sync] as Net1
+  [Game Renderer Canvas] as Canvas1
+}
+
+node "Client 2 (JavaFX / Swing)" as C2 {
+  [UI & Input Controller] as UI2
+  [Client Network & Sync] as Net2
+  [Game Renderer Canvas] as Canvas2
+}
+
+node "Client 3 (JavaFX / Swing)" as C3 {
+  [UI & Input Controller] as UI3
+  [Client Network & Sync] as Net3
+  [Game Renderer Canvas] as Canvas3
+}
+
+node "Game Server Backend (Java Core)" as Server {
+  [UDP Datagram Receiver Thread] as UDPReceiver
+  [Client Session Manager] as SessionMgr
+  [Game Engine & Game Loop (30 Ticks/s)] as Engine
+  [Collision Detector] as Collision
+  [Bomb & Explosion Manager] as BombMgr
+  [Game Map Matrix] as Map
+  [State Broadcaster] as Broadcaster
+}
+
+UI1 --> Net1 : Key Events (WASD, Space)
+Net1 --> UDPReceiver : UDP Packet (MOVE, BOMB, JOIN)
+UDPReceiver --> SessionMgr : Verify & Store Client (IP, Port)
+UDPReceiver --> Engine : Enqueue Player Input
+Engine --> Collision : Validate Movement
+Engine --> BombMgr : Update Bombs & Timer
+Engine --> Map : Update Destructible Tiles
+BombMgr --> Collision : Raycast Blast 4 Directions
+Engine --> Broadcaster : Prepare World State
+Broadcaster --> Net1 : UDP Packet (STATE, EXPLODE, MAP_UPDATE)
+Broadcaster --> Net2 : UDP Packet (STATE, EXPLODE, MAP_UPDATE)
+Broadcaster --> Net3 : UDP Packet (STATE, EXPLODE, MAP_UPDATE)
+Net1 --> Canvas1 : Render Frame (Players, Bombs, Flames)
+@enduml
+
+@startuml Sequence_JoinGame
+title QUY TRÌNH KẾT NỐI VÀ KHỞI TẠO TRẬN ĐẤU (JOIN GAME FLOW)
+
+actor "Người chơi 1" as P1
+participant "Client 1" as C1
+participant "Server (DatagramSocket)" as S
+participant "Session Manager" as SM
+actor "Người chơi 2, 3" as P2
+
+P1 -> C1: Mở game, nhập IP Server & Tên ("Player1")
+C1 -> S: UDP Packet: "JOIN|Player1"
+S -> SM: Đăng ký (IP, Port, ID = 1)
+SM --> S: Chấp nhận
+S --> C1: UDP Packet: "JOIN_ACK|1|SUCCESS|Joined as Player 1"
+S --> C1: UDP Packet: "MAP_INIT|15|13|<matrix_data>"
+
+P2 -> S: UDP Packet: "JOIN|Player2", "JOIN|Player3"
+S -> SM: Đăng ký Player 2, Player 3
+S --> P2: UDP Packet: "JOIN_ACK" & "MAP_INIT"
+
+alt Khi đủ người chơi (hoặc Host bấm Start)
+    S -> C1: UDP Packet: "GAME_START|3"
+    S -> P2: UDP Packet: "GAME_START|3"
+    note over S: Bắt đầu Game Loop (30 Ticks/giây)
+end
+@enduml
+
+@startuml Sequence_Movement_StateSync
+title QUY TRÌNH DI CHUYỂN VÀ ĐỒNG BỘ TRẠNG THÁI (MOVEMENT & STATE SYNC)
+
+actor "Người chơi" as P
+participant "Client Controller" as CC
+participant "Client Socket" as CS
+participant "Server Socket" as SS
+participant "Game Engine" as GE
+participant "Collision Detector" as CD
+participant "All Clients" as AC
+
+P -> CC: Nhấn giữ phím "D" (Di chuyển PHẢI)
+CC -> CS: Đóng gói lệnh
+CS -> SS: UDP: "MOVE|RIGHT"
+SS -> GE: Lưu hướng đi của Player
+loop Chu kỳ Game Tick (mỗi 33ms ~ 30 FPS)
+    GE -> CD: Kiểm tra vị trí mới (X + step, Y) có chạm Tường/Bom?
+    alt Không va chạm
+        CD --> GE: Hợp lệ -> Cập nhật tọa độ Player
+    else Bị cản trở bởi Tường cứng / Gạch mềm
+        CD --> GE: Không hợp lệ -> Giữ nguyên vị trí
+    end
+    GE -> SS: Đóng gói gói tin STATE
+    SS -> AC: UDP Broadcast: "STATE|tick|p1,x,y,alive;p2,x,y,alive|bombs"
+    AC -> AC: Render cập nhật vị trí nhân vật mượt mà trên Canvas
+end
+@enduml
+
+@startuml Sequence_Bomb_Explosion
+title QUY TRÌNH ĐẶT BOM, NỔ LAN VÀ TIÊU DIỆT ĐỐI THỦ
+
+actor "Player 1" as P1
+participant "Client 1" as C1
+participant "Server" as S
+participant "Bomb Manager" as BM
+participant "Map Matrix" as MM
+participant "All Clients" as AC
+
+P1 -> C1: Bấm phím SPACE
+C1 -> S: UDP: "BOMB"
+S -> BM: Đặt quả bom tại ô tròn (GridX, GridY) của Player 1 (Countdown = 3000ms)
+S -> AC: UDP Broadcast: "STATE" (chứa danh sách bom mới)
+AC -> AC: Vẽ quả bom nhấp nháy tại (GridX, GridY)
+
+note over BM: Server đếm ngược mỗi Tick (3000ms -> 0ms)
+
+BM -> S: Bom kích nổ!
+S -> BM: Tính toán vùng nổ 4 hướng (Lên, Xuống, Trái, Phải) bán kính = 2
+BM -> MM: Quét tia lửa:
+note over BM, MM
+- Gặp Tường cứng -> Dừng tia lửa.
+- Gặp Gạch mềm -> Đánh dấu phá hủy gạch mềm, dừng tia lửa hướng đó.
+- Quét các Player đứng trên đường lửa -> Set alive = false (chết).
+end note
+S -> MM: Cập nhật các ô gạch vỡ thành ô trống (TileType = 0)
+S -> AC: UDP Broadcast: "EXPLODE|bombId|x1,y1;x2,y2;x3,y3"
+S -> AC: UDP Broadcast: "TILE_UPDATE|gridX|gridY|0"
+alt Nếu có người chơi trúng bom
+    S -> AC: UDP Broadcast: "PLAYER_DIED|targetId|p1"
+end
+
+alt Kiểm tra chỉ còn 1 người sống sót
+    S -> AC: UDP Broadcast: "GAME_OVER|winnerId|winnerName"
+end
+@enduml
+
+@startuml ClassDiagram_Server
+title SƠ ĐỒ LỚP PHÍA SERVER (BACKEND CORE - THÀNH VIÊN 1)
+
+package "com.bomberman.common" {
+    enum Direction {
+        UP
+        DOWN
+        LEFT
+        RIGHT
+        STOP
+    }
+    enum TileType {
+        EMPTY
+        HARD_WALL
+        SOFT_BRICK
+        BOMB
+    }
+    class GameConstants {
+        + PORT: int = 9876
+        + TICK_RATE: int = 30
+        + MAP_WIDTH: int = 15
+        + MAP_HEIGHT: int = 13
+        + BOMB_FUSE_TIME: int = 3000
+        + BOMB_RADIUS: int = 2
+        + PLAYER_SPEED: double = 0.15
+    }
+}
+
+package "com.bomberman.server.model" {
+    class Player {
+        - id: int
+        - name: String
+        - x: double
+        - y: double
+        - direction: Direction
+        - alive: boolean
+        - score: int
+        + move(dx, dy)
+        + getGridX(): int
+        + getGridY(): int
+    }
+    class Bomb {
+        - id: String
+        - ownerId: int
+        - gridX: int
+        - gridY: int
+        - timerMs: long
+        - radius: int
+        + update(deltaMs): boolean
+    }
+    class GameMap {
+        - tiles: int[][]
+        + initDefaultMap()
+        + isWalkable(x, y): boolean
+        + destroyBrick(x, y)
+        + toFlatString(): String
+    }
+}
+
+package "com.bomberman.server.network" {
+    class PlayerSession {
+        - player: Player
+        - address: InetAddress
+        - port: int
+        - lastHeartbeat: long
+    }
+    class UdpServer {
+        - socket: DatagramSocket
+        - running: boolean
+        + start()
+        + send(packet, address, port)
+        + broadcast(message)
+    }
+}
+
+package "com.bomberman.server.logic" {
+    class CollisionDetector {
+        + canMoveTo(map, x, y): boolean
+    }
+    class ExplosionHandler {
+        + calculateExplosionCells(map, bomb): List<Cell>
+    }
+    class GameEngine {
+        - server: UdpServer
+        - map: GameMap
+        - players: Map<Integer, PlayerSession>
+        - bombs: List<Bomb>
+        + handlePacket(msg, address, port)
+        + tick()
+    }
+}
+
+GameEngine --> UdpServer
+GameEngine --> GameMap
+GameEngine --> CollisionDetector
+GameEngine --> ExplosionHandler
+GameEngine "1" *-- "*" PlayerSession
+GameEngine "1" *-- "*" Bomb
+PlayerSession *-- Player
+@enduml
