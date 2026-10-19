@@ -1,8 +1,78 @@
-bin/
+# ==========================================
+# 1. Java Build & Compiled Artifacts (File build)
+# ==========================================
 *.class
+bin/
+build/
+dist/
+out/
+target/
+*.jar
+*.war
+*.ear
+# Giu lai thu vien jar neu nam trong thu muc lib/ (neu co)
+!lib/*.jar
+!lib/**/*.jar
+
+# ==========================================
+# 2. NetBeans Private Settings (Cau hinh ca nhan)
+# ==========================================
+nbproject/private/
+nbproject/private/**
+
+# ==========================================
+# 3. IDEs & Editors (Eclipse, IntelliJ, VS Code)
+# ==========================================
+# Eclipse
+.project
+.classpath
+.settings/
+
+# IntelliJ IDEA
 .idea/
 *.iml
+*.iws
+*.ipr
+
+# VS Code
 .vscode/
-/nbproject/private/
-/build/
-/dist/
+.history/
+
+# ==========================================
+# 4. Office Temporary & Lock Files (File rac Word/Office)
+# ==========================================
+~$*
+~*.tmp
+.~lock.*#
+
+# ==========================================
+# 5. OS & System Junk Files (File rac he dieu hanh)
+# ==========================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+
+# ==========================================
+# 6. Temporary, Log & Crash Dump Files
+# ==========================================
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+hs_err_pid*
+replay_pid*
