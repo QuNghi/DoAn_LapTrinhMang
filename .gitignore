@@ -1,78 +1,25 @@
-# ==========================================
-# 1. Java Build & Compiled Artifacts (File build)
-# ==========================================
-*.class
+# Build / Compiled output
 bin/
 build/
 dist/
-out/
-target/
-*.jar
-*.war
-*.ear
-# Giu lai thu vien jar neu nam trong thu muc lib/ (neu co)
-!lib/*.jar
-!lib/**/*.jar
+*.class
 
-# ==========================================
-# 2. NetBeans Private Settings (Cau hinh ca nhan)
-# ==========================================
-nbproject/private/
-nbproject/private/**
-
-# ==========================================
-# 3. IDEs & Editors (Eclipse, IntelliJ, VS Code)
-# ==========================================
-# Eclipse
-.project
-.classpath
-.settings/
-
-# IntelliJ IDEA
+# IDE & Editor configs
 .idea/
 *.iml
-*.iws
-*.ipr
-
-# VS Code
 .vscode/
-.history/
+nbproject/private/
 
-# ==========================================
-# 4. Office Temporary & Lock Files (File rac Word/Office)
-# ==========================================
+# Word temp files & documents not needed for grading
 ~$*
-~*.tmp
-.~lock.*#
+*.docx
+*.doc
+Hoang.docx
+Ke Hoach.docx
 
-# ==========================================
-# 5. OS & System Junk Files (File rac he dieu hanh)
-# ==========================================
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-
-# Linux
-*~
-.fuse_hidden*
-.directory
-
-# ==========================================
-# 6. Temporary, Log & Crash Dump Files
-# ==========================================
-*.log
-*.tmp
-*.temp
-*.bak
-*.swp
-*.swo
-hs_err_pid*
-replay_pid*
+# Planning, notes & internal task files
+task.md
+CONG_NGHE_DONG_BO*
+[cC][oO][nN][gG]_[nN][gG][hH][eE]_[dD][oO][nN][gG]_[bB][oO]*
+[kK][eE]*[hH][oO][aA][cC][hH]*
+planttext_bomberman.puml
